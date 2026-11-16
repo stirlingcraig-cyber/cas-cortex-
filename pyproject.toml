@@ -1,0 +1,18 @@
+[project]
+name = "cas-cortex"
+version = "0.5.0"
+description = "CAS Cortex - self-learning engineering agent (memory + skill learning)"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+cloud = ["anthropic>=0.40"]
+
+[project.scripts]
+cortex = "cortex.cli:main"
+
+[tool.setuptools]
+packages = ["cortex", "cortex.memory", "cortex.evaluator"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

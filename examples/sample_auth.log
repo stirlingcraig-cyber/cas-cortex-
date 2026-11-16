@@ -1,0 +1,9 @@
+Nov 15 19:00:00 gw sshd[812]: Failed password for invalid user admin from 203.0.113.7 port 50122 ssh2
+Nov 15 19:00:01 gw sshd[812]: Failed password for invalid user admin from 203.0.113.7 port 51122 ssh2
+Nov 15 19:00:02 gw sshd[812]: Failed password for invalid user admin from 203.0.113.7 port 52122 ssh2
+Nov 15 19:00:03 gw sshd[812]: Failed password for invalid user admin from 203.0.113.7 port 53122 ssh2
+Nov 15 19:00:04 gw sshd[812]: Failed password for invalid user admin from 203.0.113.7 port 54122 ssh2
+Nov 15 19:00:05 gw sshd[812]: Failed password for invalid user admin from 203.0.113.7 port 55122 ssh2
+Nov 15 19:00:20 gw sshd[812]: Failed password for root from 198.51.100.4 port 40022 ssh2
+Nov 15 19:01:10 gw sshd[812]: Accepted password for admin from 203.0.113.7 port 50999 ssh2
+Nov 15 19:02:00 gw CRON[901]: (root) CMD (run-parts /etc/cron.hourly)

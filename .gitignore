@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.venv/
+cortex_data/
+.pytest_cache/
+*.egg-info/
+last_spec.txt

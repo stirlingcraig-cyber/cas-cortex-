@@ -1,0 +1,2 @@
+pytest>=8
+# Optional, only for the cloud provider:  pip install anthropic

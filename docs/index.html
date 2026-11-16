@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>CAS Cortex</title>
+<meta name="description" content="CAS Cortex on iPhone - threat monitor, learning progress and skills">
+<meta name="theme-color" content="#14213D">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Cortex">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" type="image/png" href="icons/icon-192.png">
+<link rel="manifest" href="manifest.webmanifest">
+<style>
+:root{--navy:#14213D;--teal:#0F7C7A;--teal-l:#E3F2F1;--bg:#F2F5F7;--card:#fff;--ink:#1F2328;--mute:#6B7280;
+--line:#DCE3E6;--red:#C62828;--amber:#E08A00;--green:#1E8E3E;--code:#0E1726;--codefg:#D7E3EA;
+--p1b:#FDE2E1;--p1f:#B71C1C;--p2b:#FFEFD5;--p2f:#A15C00;--p3b:#FFF9DB;--p3f:#7A6200;--p4b:#EEF1F4;--p4f:#5B6470}
+@media (prefers-color-scheme:dark){:root{--bg:#0B1220;--card:#131C2E;--ink:#E6EDF3;--mute:#93A1B3;--line:#24324A;
+--teal-l:#0F2E33;--p1b:#3A1416;--p1f:#FF8A80;--p2b:#3A2A10;--p2f:#FFC266;--p3b:#33300F;--p3f:#F2DC6B;--p4b:#1C2636;--p4f:#AEB9C7}}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.45 -apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Roboto,sans-serif}
+header{position:sticky;top:0;z-index:5;background:var(--navy);color:#fff;padding:calc(env(safe-area-inset-top) + 10px) 16px 12px}
+header h1{margin:0;font-size:20px;letter-spacing:.2px}
+header .sub{font-size:12px;color:#9CC7C5}
+main{padding:14px 14px calc(86px + env(safe-area-inset-bottom))}
+section{display:none}section.on{display:block}
+h2{font-size:22px;margin:4px 0 10px;color:var(--ink)}
+h3{font-size:15px;margin:18px 0 8px;color:var(--teal);text-transform:uppercase;letter-spacing:.6px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:12px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.stat .k{font-size:12px;color:var(--mute)}.stat .v{font-size:24px;font-weight:700;color:var(--ink)}
+.muted{color:var(--mute);font-size:14px}
+.btn{appearance:none;border:0;border-radius:12px;padding:12px 16px;font-size:16px;font-weight:600;background:var(--teal);color:#fff;width:100%;margin-top:8px}
+.btn.ghost{background:var(--teal-l);color:var(--teal)}
+.btn.small{width:auto;padding:8px 12px;font-size:14px;margin:4px 6px 0 0}
+.row{display:flex;gap:8px;flex-wrap:wrap}
+textarea,input,select{width:100%;font:14px ui-monospace,Menlo,monospace;border:1px solid var(--line);border-radius:10px;padding:10px;background:var(--card);color:var(--ink)}
+textarea{min-height:120px}
+label{font-size:13px;color:var(--mute);display:block;margin:10px 0 4px}
+.chips{display:flex;gap:6px;margin:10px 0}
+.chip{flex:1;text-align:center;border-radius:10px;padding:8px 4px;font-weight:700;font-size:14px}
+.P1{background:var(--p1b);color:var(--p1f)}.P2{background:var(--p2b);color:var(--p2f)}
+.P3{background:var(--p3b);color:var(--p3f)}.P4{background:var(--p4b);color:var(--p4f)}
+.alert{border-radius:12px;padding:12px;margin-bottom:8px;border:1px solid var(--line);background:var(--card)}
+.alert .top{display:flex;gap:8px;align-items:center}
+.badge{border-radius:7px;padding:2px 8px;font-weight:800;font-size:13px}
+.alert .t{font-weight:700}.alert .d{font-size:14px;color:var(--mute);margin-top:4px}
+pre{background:var(--code);color:var(--codefg);border-radius:10px;padding:12px;overflow:auto;font:12px/1.45 ui-monospace,Menlo,monospace;margin:8px 0 0;white-space:pre}
+.item{padding:12px 0;border-bottom:1px solid var(--line)}.item:last-child{border:0}
+.pill{display:inline-block;font-size:12px;border-radius:999px;padding:2px 8px;background:var(--teal-l);color:var(--teal);margin-left:6px;font-weight:600}
+.pill.amber{background:var(--p2b);color:var(--p2f)}
+details summary{cursor:pointer;font-weight:600;list-style:none}details summary::-webkit-details-marker{display:none}
+table{width:100%;border-collapse:collapse;font-size:14px}td,th{padding:7px 4px;border-bottom:1px solid var(--line);text-align:left}
+th{color:var(--mute);font-weight:600;font-size:12px}
+nav{position:fixed;bottom:0;left:0;right:0;z-index:6;display:flex;background:var(--card);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom)}
+nav button{flex:1;appearance:none;border:0;background:none;padding:8px 0 6px;color:var(--mute);font-size:11px;font-weight:600}
+nav button svg{display:block;margin:0 auto 2px;width:24px;height:24px}
+nav button.on{color:var(--teal)}
+.banner{background:var(--teal);color:#fff;border-radius:14px;padding:14px;margin-bottom:12px}
+.banner b{display:block;font-size:16px}
+.ok{color:var(--green)}.bad{color:var(--red)}
+.legend{display:flex;gap:12px;font-size:12px;color:var(--mute);margin-top:6px;flex-wrap:wrap}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:4px;vertical-align:-1px}
+</style>
+</head>
+<body>
+<header><h1>CAS Cortex</h1><div class="sub" id="hdr-sub">self-learning engineering agent</div></header>
+<main>
+  <section id="home" class="on">
+    <div class="banner" id="home-banner"><b>Loading…</b></div>
+    <div class="grid">
+      <div class="card stat"><div class="k">Generation</div><div class="v" id="s-gen">–</div></div>
+      <div class="card stat"><div class="k">Latest score</div><div class="v" id="s-score">–</div></div>
+      <div class="card stat"><div class="k">Skills learned</div><div class="v" id="s-skills">–</div></div>
+      <div class="card stat"><div class="k">Lessons</div><div class="v" id="s-lessons">–</div></div>
+    </div>
+    <div class="card"><div class="muted" id="s-model">AI model: –</div><div class="muted" id="s-pub">Last published: –</div></div>
+    <h3>What you can do here</h3>
+    <div class="card">
+      <div class="item"><b>Threat Monitor</b><div class="muted">Paste or open a log file and get prioritised P1–P4 alerts. Runs entirely on your iPhone - nothing is uploaded.</div></div>
+      <div class="item"><b>Progress</b><div class="muted">The learning curve from your PC's evaluations.</div></div>
+      <div class="item"><b>Skills</b><div class="muted">Every skill Cortex has learned, its code, and its lessons.</div></div>
+      <div class="item"><b>Tools</b><div class="muted">Run learned skills on your phone (e.g. CVSS scoring, IOC extraction).</div></div>
+    </div>
+    <button class="btn ghost" onclick="loadStatus(true)">Refresh from PC</button>
+    <a class="btn ghost" style="display:block;text-align:center;text-decoration:none;box-sizing:border-box" href="CAS_Cortex_User_Guide.pdf">User guide (PDF)</a>
+    <p class="muted" style="margin-top:14px">Training runs on your PC (it needs the local AI model). After training, press <b>Publish to iPhone</b> on the PC's Progress tab, then refresh here.</p>
+  </section>
+
+  <section id="monitor">
+    <h2>Threat Monitor</h2>
+    <div class="card">
+      <div class="row">
+        <button class="btn small ghost" onclick="useSample('auth')">Sample: SSH log</button>
+        <button class="btn small ghost" onclick="useSample('events')">Sample: events</button>
+        <button class="btn small ghost" onclick="document.getElementById('file').click()">Open file…</button>
+        <input type="file" id="file" accept=".log,.txt,.jsonl,.json,text/plain" style="display:none" onchange="openFile(this)">
+      </div>
+      <label for="log">Log lines (sshd auth log or JSON lines)</label>
+      <textarea id="log" placeholder="Paste log lines here…"></textarea>
+      <label for="crit">Critical assets (1 low – 3 critical)</label>
+      <input id="crit" placeholder="e.g. 10.0.0.5=3 FILESERVER01=3" value="203.0.113.7=3">
+      <div class="grid">
+        <div><label for="fc">Brute force: failures</label><input id="fc" type="number" value="5" min="2"></div>
+        <div><label for="fw">within seconds</label><input id="fw" type="number" value="60" min="5"></div>
+      </div>
+      <button class="btn" onclick="analyse()">Analyse</button>
+    </div>
+    <div class="chips" id="chips"></div>
+    <div id="alerts"></div>
+    <p class="muted" id="mon-summary"></p>
+  </section>
+
+  <section id="progress">
+    <h2>Progress</h2>
+    <div class="card"><div id="chart"></div>
+      <div class="legend"><span><i style="background:#14213D"></i>Overall</span><span><i style="background:#0F7C7A"></i>Train (retention)</span><span><i style="background:#E08A00"></i>Holdout (transfer)</span></div>
+    </div>
+    <h3>Latest evaluation by area</h3>
+    <div class="card" id="latest-table"><span class="muted">No evaluations published yet.</span></div>
+    <h3>All evaluations</h3>
+    <div class="card" id="runs-table"><span class="muted">–</span></div>
+    <p class="muted">Train = can it still do what it practised. Holdout = does learning transfer to problems it has never practised (the best sign of real learning).</p>
+  </section>
+
+  <section id="skills">
+    <h2>Skills &amp; Memory</h2>
+    <div class="card" id="skills-list"><span class="muted">No skills published yet.</span></div>
+    <h3>Lessons</h3>
+    <div class="card" id="lessons-list"><span class="muted">–</span></div>
+    <h3>Knowledge graph</h3>
+    <div class="card" id="knowledge-list"><span class="muted">–</span></div>
+    <h3>Recent practice</h3>
+    <div class="card" id="episodes-list"><span class="muted">–</span></div>
+  </section>
+
+  <section id="tools">
+    <h2>Tools</h2>
+    <p class="muted">Run a skill Cortex has learned, right on your phone. The first run downloads a Python engine (about 10 MB) - after that it's quick.</p>
+    <div class="card">
+      <label for="tool-skill">Skill</label>
+      <select id="tool-skill" onchange="pickSkill()"></select>
+      <div class="muted" id="tool-desc" style="margin-top:8px"></div>
+      <label for="tool-expr">Call (edit the values)</label>
+      <textarea id="tool-expr" style="min-height:70px"></textarea>
+      <button class="btn" id="tool-run" onclick="runSkill()">Run</button>
+      <pre id="tool-out" style="display:none"></pre>
+    </div>
+  </section>
+</main>
+
+<nav id="nav">
+  <button data-s="home" class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>Home</button>
+  <button data-s="monitor"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/></svg>Monitor</button>
+  <button data-s="progress"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 20h18M5 16l4-5 4 3 6-8"/></svg>Progress</button>
+  <button data-s="skills"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><circle cx="5" cy="6" r="2"/><circle cx="19" cy="6" r="2"/><circle cx="5" cy="18" r="2"/><circle cx="19" cy="18" r="2"/><path d="M7 7l3 3M17 7l-3 3M7 17l3-3M17 17l-3-3"/></svg>Skills</button>
+  <button data-s="tools"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.6 2.6-2.4-.6-.6-2.4z"/></svg>Tools</button>
+</nav>
+
+<script src="engine.js"></script>
+<script src="samples.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

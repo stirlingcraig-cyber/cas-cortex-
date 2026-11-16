@@ -1,0 +1,14 @@
+{"ts": 1763233200, "type": "conn", "source": "FINANCE-PC04", "dest": "185.220.101.4"}
+{"ts": 1763233200, "type": "login", "user": "j.smith", "lat": 55.8642, "lon": -4.2518}
+{"ts": 1763233260, "type": "process", "source": "HR-LAPTOP2", "cmdline": "powershell.exe -nop -w hidden -enc SQBFAFgAKABOAGUAdwAtAE8AYgBqAGUAYwB0ACkA"}
+{"ts": 1763233290, "type": "process", "source": "DEV-01", "cmdline": "python manage.py runserver"}
+{"ts": 1763233501, "type": "conn", "source": "FINANCE-PC04", "dest": "185.220.101.4"}
+{"ts": 1763233800, "type": "conn", "source": "FINANCE-PC04", "dest": "185.220.101.4"}
+{"ts": 1763234101, "type": "conn", "source": "FINANCE-PC04", "dest": "185.220.101.4"}
+{"ts": 1763234400, "type": "conn", "source": "FINANCE-PC04", "dest": "185.220.101.4"}
+{"ts": 1763234701, "type": "conn", "source": "FINANCE-PC04", "dest": "185.220.101.4"}
+{"ts": 1763235000, "type": "conn", "source": "FINANCE-PC04", "dest": "185.220.101.4"}
+{"ts": 1763235301, "type": "conn", "source": "FINANCE-PC04", "dest": "185.220.101.4"}
+{"ts": 1763235600, "type": "conn", "source": "FINANCE-PC04", "dest": "185.220.101.4"}
+{"ts": 1763235600, "type": "login", "user": "j.smith", "lat": 1.3521, "lon": 103.8198}
+{"ts": 1763235901, "type": "conn", "source": "FINANCE-PC04", "dest": "185.220.101.4"}
