@@ -79,7 +79,7 @@ nav button.on{color:var(--teal)}
     <div class="card"><div class="muted" id="s-model">AI model: –</div><div class="muted" id="s-pub">Last published: –</div></div>
     <h3>What you can do here</h3>
     <div class="card">
-      <div class="item"><b>Threat Monitor</b><div class="muted">Paste or open a log file and get prioritised P1–P4 alerts. Runs entirely on your iPhone - nothing is uploaded.</div></div>
+      <div class="item"><b>Threat Monitor</b><div class="muted">Open your CAS HomeNet Guard alerts (or any supported log) and get prioritised P1–P4 alerts, including devices showing several compromise signs. Runs entirely on your iPhone - nothing is uploaded.</div></div>
       <div class="item"><b>Progress</b><div class="muted">The learning curve from your PC's evaluations.</div></div>
       <div class="item"><b>Skills</b><div class="muted">Every skill Cortex has learned, its code, and its lessons.</div></div>
       <div class="item"><b>Tools</b><div class="muted">Run learned skills on your phone (e.g. CVSS scoring, IOC extraction).</div></div>
@@ -95,10 +95,11 @@ nav button.on{color:var(--teal)}
       <div class="row">
         <button class="btn small ghost" onclick="useSample('auth')">Sample: SSH log</button>
         <button class="btn small ghost" onclick="useSample('events')">Sample: events</button>
+        <button class="btn small ghost" onclick="useSample('homenet')">Sample: HomeNet Guard</button>
         <button class="btn small ghost" onclick="document.getElementById('file').click()">Open file…</button>
         <input type="file" id="file" accept=".log,.txt,.jsonl,.json,text/plain" style="display:none" onchange="openFile(this)">
       </div>
-      <label for="log">Log lines (sshd auth log or JSON lines)</label>
+      <label for="log">Log lines (HomeNet Guard alerts.jsonl, sshd auth log or JSON lines)</label>
       <textarea id="log" placeholder="Paste log lines here…"></textarea>
       <label for="crit">Critical assets (1 low – 3 critical)</label>
       <input id="crit" placeholder="e.g. 10.0.0.5=3 FILESERVER01=3" value="203.0.113.7=3">

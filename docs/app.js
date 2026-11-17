@@ -123,7 +123,8 @@ function analyse() {
     failCount: parseInt($("fc").value, 10) || 5, failWindow: parseInt($("fw").value, 10) || 60,
     criticality: CortexEngine.parseCriticality($("crit").value),
   });
-  const alerts = m.feedText($("log").value).slice().reverse();
+  const alerts = m.feedText($("log").value).slice()
+    .sort((a, b) => a.priority.localeCompare(b.priority) || b.ts - a.ts);   // most urgent first, then newest
   const counts = { P1: 0, P2: 0, P3: 0, P4: 0 };
   alerts.forEach(a => counts[a.priority]++);
   $("chips").innerHTML = ["P1", "P2", "P3", "P4"].map(p => `<div class="chip ${p}">${p}: ${counts[p]}</div>`).join("");

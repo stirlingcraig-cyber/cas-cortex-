@@ -220,6 +220,13 @@ def cmd_watch(rt, a):
     for c in a.critical or []:
         k, _, v = c.partition("=")
         crit[k] = int(v or 3)
+    if a.homenet:
+        from .realtime import HNG_DEFAULT_PATH
+        a.file, a.follow, a.from_start = a.file if a.file not in (None, "") else HNG_DEFAULT_PATH, True, True
+        if not Path(a.file).exists():
+            sys.exit(f"HomeNet Guard alerts not found at {a.file}. Is CAS HomeNet Guard installed and running?")
+    elif not a.file:
+        sys.exit("Give a log file (or - for stdin), or use --homenet")
     learned = load_learned(rt.memory(read_only=True).skill_code_map()) if a.use_learned else {}
     mon = ThreatMonitor(fail_count=a.fail_count, fail_window=a.fail_window, criticality=crit,
                         learned=learned, triage=make_triage(rt.llm) if a.triage else None,
@@ -322,7 +329,9 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("memory", help="lessons, knowledge graph, episodes"); s.add_argument("-n", type=int, default=10)
     sub.add_parser("report", help="learning curve across evaluations")
     s = sub.add_parser("watch", help="real-time threat, risk and harm monitor")
-    s.add_argument("file", help="log file, or - for stdin")
+    s.add_argument("file", nargs="?", help="log file, or - for stdin (optional with --homenet)")
+    s.add_argument("--homenet", action="store_true",
+                   help="watch CAS HomeNet Guard's alerts live (C:\\ProgramData\\CAS Solutions\\HomeNetGuard\\alerts.jsonl)")
     s.add_argument("--follow", action="store_true", help="keep watching like tail -f")
     s.add_argument("--from-start", action="store_true", help="with --follow, read existing lines first")
     s.add_argument("--use-learned", action="store_true", help="use detectors Cortex has learned")

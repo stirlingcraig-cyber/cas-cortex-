@@ -105,7 +105,58 @@ RISK_PROFILE = {
     "beaconing": (4, 4, "moderate"),
     "impossible_travel": (3, 4, "moderate"),
     "suspicious_process": (4, 4, "moderate"),
+    "multi_signal_device": (5, 5, "severe"),
 }
+
+
+# ------------------------------------------------------- CAS HomeNet Guard
+# HomeNet Guard (C#) writes one JSON alert per line to
+# C:\ProgramData\CAS Solutions\HomeNetGuard\alerts.jsonl, e.g.
+# {"Id": "...", "TimeUtc": "2026-11-17T18:00:00.1234567Z", "Severity": "High", "Source": "Anomaly",
+#  "Title": "Port scan detected", "Detail": "...", "LocalIp": "192.168.1.20", "RemoteIp": "...",
+#  "RemotePort": 23, "Recommendation": "...", "Status": "Open", "HighConfidence": false}
+HNG_DEFAULT_PATH = r"C:\ProgramData\CAS Solutions\HomeNetGuard\alerts.jsonl"
+HNG_SEVERITY = {"Info": 0, "Low": 1, "Medium": 2, "High": 3, "Critical": 4}
+HNG_HARM = {4: "severe", 3: "moderate", 2: "minor", 1: "none", 0: "none"}
+HNG_IMPACT = {"malicious_server": 5, "exploit_attempt": 4, "c2_beaconing": 4, "port_scan": 3,
+              "worm_scanning": 5, "data_exfiltration": 5, "suspicious_program": 4, "new_device": 2,
+              "exposed_service": 4, "device_risk": 3, "network_anomaly": 3, "system": 2}
+MULTI_SIGNAL_WINDOW = 24 * 3600
+MULTI_SIGNAL_KINDS = 3
+_HNG_TS = re.compile(r"^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?(Z|[+-]\d{2}:\d{2})?$")
+
+
+def hng_time(s) -> float | None:
+    """Parse .NET's ISO time (up to 7 fractional digits, usually ending in Z) as UTC seconds."""
+    m = _HNG_TS.match(str(s or ""))
+    if not m:
+        return None
+    y, mo, d, h, mi, se, frac, tz = m.groups()
+    from datetime import timezone, timedelta
+    tzinfo = timezone.utc
+    if tz and tz != "Z":
+        sign = 1 if tz[0] == "+" else -1
+        tzinfo = timezone(sign * timedelta(hours=int(tz[1:3]), minutes=int(tz[4:6])))
+    dt = datetime(int(y), int(mo), int(d), int(h), int(mi), int(se), tzinfo=tzinfo)
+    return dt.timestamp() + (int(frac[:3].ljust(3, "0")) / 1000 if frac else 0.0)
+
+
+def hng_kind(e: dict) -> str:
+    src, title = str(e.get("Source", "")), str(e.get("Title", "")).lower()
+    if src == "ThreatIntel" or "malicious server" in title:
+        return "malicious_server"
+    if src == "Signature":
+        return "exploit_attempt"
+    if src == "DeviceAudit":
+        return ("new_device" if "new device" in title else
+                "exposed_service" if "service" in title else "device_risk")
+    if src == "Anomaly":
+        for key, kind in (("beacon", "c2_beaconing"), ("port scan", "port_scan"), ("worm", "worm_scanning"),
+                          ("upload", "data_exfiltration"), ("program", "suspicious_program")):
+            if key in title:
+                return kind
+        return "network_anomaly"
+    return "system"
 
 
 def load_learned(skill_code: dict[str, str]) -> dict:
@@ -145,6 +196,9 @@ class ThreatMonitor:
         self.alerts: list[dict] = []
         self.events = 0
         self._seq = 0
+        self.hng_seen = defaultdict(deque)
+        self.hng_escalated = {}
+        self.hng_ids = set()
 
     # ---------------------------------------------------------------- parsing
     @staticmethod
@@ -155,10 +209,15 @@ class ThreatMonitor:
         if line.startswith("{"):
             try:
                 e = json.loads(line)
-                e.setdefault("ts", time.time())
-                return e if "type" in e else None
             except json.JSONDecodeError:
                 return None
+            if not isinstance(e, dict):
+                return None
+            if "TimeUtc" in e and "Title" in e and "Severity" in e:   # CAS HomeNet Guard alert
+                ts = hng_time(e["TimeUtc"])
+                return dict(e, type="hng_alert", ts=ts if ts is not None else time.time())
+            e.setdefault("ts", time.time())
+            return e if "type" in e else None
         ts = time.time()
         m = _SYSLOG_TS.match(line)
         if m:
@@ -224,17 +283,64 @@ class ThreatMonitor:
             if ind:
                 raised.append(self._alert("suspicious_process", e.get("source", "?"), e["ts"],
                                           "indicators: " + ", ".join(ind)))
+        elif t == "hng_alert":
+            hid = e.get("Id")
+            if hid and hid in self.hng_ids:      # same alert again after HomeNet Guard rewrote its file
+                self.events -= 1
+                return []
+            if hid:
+                self.hng_ids.add(hid)
+            raised += self._homenet(e)
         return raised
 
-    def _alert(self, kind: str, entity: str, ts: float, detail: str) -> dict:
+    def _homenet(self, e: dict) -> list[dict]:
+        """Turn a HomeNet Guard alert into a ranked Cortex alert, and escalate any home device
+        that shows several different kinds of compromise sign within 24 hours."""
+        status = str(e.get("Status", "Open"))
+        sev = e.get("Severity")
+        sev = sev if isinstance(sev, int) else HNG_SEVERITY.get(str(sev), 2)
+        if status in ("Ignored", "Resolved") or sev <= 0:
+            return []
+        kind = hng_kind(e)
+        local, remote = e.get("LocalIp") or "", e.get("RemoteIp") or ""
+        entity = local or remote or "?"
+        L = min(5, sev + 1 + (1 if e.get("HighConfidence") else 0))
+        detail = str(e.get("Title", ""))
+        if e.get("Detail"):
+            detail += " - " + str(e["Detail"])
+        if remote and remote != entity:
+            detail += f" (remote {remote}" + (f":{e['RemotePort']}" if e.get("RemotePort") else "") + ")"
+        if status == "Blocked":
+            detail += " [already blocked by HomeNet Guard]"
+        out = [self._alert(kind, entity, e["ts"], detail,
+                           profile=(L, HNG_IMPACT[kind], HNG_HARM[sev]),
+                           advice=e.get("Recommendation") or None)]
+        if local:
+            hist = self.hng_seen[local]
+            hist.append((e["ts"], kind))
+            while hist and e["ts"] - hist[0][0] > MULTI_SIGNAL_WINDOW:
+                hist.popleft()
+            kinds = sorted({k for _, k in hist})
+            last = self.hng_escalated.get(local)
+            if len(kinds) >= MULTI_SIGNAL_KINDS and (last is None or e["ts"] - last > MULTI_SIGNAL_WINDOW):
+                self.hng_escalated[local] = e["ts"]
+                out.append(self._alert("multi_signal_device", local, e["ts"],
+                                       f"{len(kinds)} different warning signs within 24h: " + ", ".join(kinds),
+                                       advice="Treat this device as compromised: disconnect it from the network, "
+                                              "then factory-reset it or run a full malware scan before reconnecting."))
+        return out
+
+    def _alert(self, kind: str, entity: str, ts: float, detail: str, profile=None, advice=None) -> dict:
         self._seq += 1
-        L, I, harm = RISK_PROFILE[kind]
+        L, I, harm = profile or RISK_PROFILE[kind]
         crit = int(self.criticality.get(entity, 2))
         risk = {"id": f"A{self._seq}", "likelihood": L, "impact": I,
                 "criticality": max(1, min(3, crit)), "harm": harm if harm in _HARMS else "moderate"}
         pr = self.fn["prioritise_risks"]([risk])[0]
         a = {"id": risk["id"], "ts": ts, "kind": kind, "entity": entity, "detail": detail,
              "score": pr["score"], "priority": pr["priority"]}
+        if advice:
+            a["advice"] = advice
         if self.triage and a["priority"] in ("P1", "P2"):
             try:
                 a["assessment"] = self.triage(a)
@@ -268,14 +374,47 @@ def make_triage(llm):
     return triage
 
 
-def follow(path: Path, monitor: ThreatMonitor, from_start: bool, kill_check, poll: float = 0.5):
-    with Path(path).open(encoding="utf-8", errors="replace") as f:
-        if not from_start:
-            f.seek(0, 2)
-        while True:
-            kill_check()
-            line = f.readline()
-            if line:
-                monitor.feed(line)
-            else:
-                time.sleep(poll)
+def follow(path: Path, monitor: ThreatMonitor, from_start: bool, kill_check, poll: float = 1.0):
+    """Watch a log like `tail -f` WITHOUT keeping it open between checks.
+
+    CAS HomeNet Guard rewrites its alerts.jsonl by replacing the file; on Windows that fails
+    if another program holds it open. So each check opens, reads only the new bytes, and
+    closes. A file that shrinks (replaced or rotated) is read again from the start; HomeNet
+    Guard alerts already seen are skipped by their Id."""
+    path = Path(path)
+    offset = 0 if from_start or not path.exists() else path.stat().st_size
+    pending, sig, ident = b"", b"", None
+    while True:
+        kill_check()
+        try:
+            st = path.stat()
+        except FileNotFoundError:
+            time.sleep(poll)
+            continue
+        new_ident = (st.st_dev, st.st_ino)
+        if (ident is not None and new_ident != ident) or st.st_size < offset:
+            offset, pending, sig = 0, b"", b""          # replaced, rewritten or rotated
+        ident = new_ident
+        try:
+            with path.open("rb") as f:
+                if sig:                                  # same bytes still before our position?
+                    f.seek(offset - len(sig))
+                    if f.read(len(sig)) != sig:
+                        offset, pending, sig = 0, b"", b""
+                if st.st_size > offset:
+                    f.seek(offset)
+                    data = f.read(st.st_size - offset)
+                else:
+                    data = b""
+        except OSError:
+            time.sleep(poll)
+            continue
+        if data:
+            offset += len(data)
+            sig = (sig + data)[-64:]
+            chunk = pending + data
+            lines = chunk.split(b"\n")
+            pending = lines.pop()
+            for line in lines:
+                monitor.feed(line.decode("utf-8", errors="replace"))
+        time.sleep(poll)

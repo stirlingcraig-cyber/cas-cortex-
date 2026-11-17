@@ -878,6 +878,13 @@ class CortexApp(tk.Tk):
         ttk.Button(lf, text="Browse...", command=self._browse_log).grid(row=0, column=4)
         ttk.Button(lf, text="Sample: SSH log", command=lambda: self.mon_file.set(str(be.APP_DIR / "examples" / "sample_auth.log"))).grid(row=0, column=5, padx=4)
         ttk.Button(lf, text="Sample: events", command=lambda: self.mon_file.set(str(be.APP_DIR / "examples" / "events.jsonl"))).grid(row=0, column=6)
+        hng = ttk.Frame(lf, style="Page.TFrame")
+        hng.grid(row=4, column=0, columnspan=7, sticky="w", pady=(10, 0))
+        ttk.Label(hng, text="CAS HomeNet Guard:", font=ui_font(10, "bold")).pack(side="left", padx=(0, 8))
+        ttk.Button(hng, text="Watch its alerts live", style="Accent.TButton", command=self._use_homenet).pack(side="left")
+        ttk.Button(hng, text="Sample: HomeNet Guard", command=lambda: self.mon_file.set(
+            str(be.APP_DIR / "examples" / "homenet_guard_alerts.jsonl"))).pack(side="left", padx=8)
+        ttk.Button(hng, text="Copy log for iPhone...", command=self._copy_for_iphone).pack(side="left")
         self.mon_opts = {k: tk.BooleanVar(value=v) for k, v in (("follow", False), ("from_start", True),
                                                                 ("use_learned", False), ("triage", False))}
         labels = {"follow": "Keep watching (live)", "from_start": "Include existing lines",
@@ -926,6 +933,34 @@ class CortexApp(tk.Tk):
         self.mon_con.pack(fill="x", pady=(6, 0))
         pw.add(tf, weight=3); pw.add(bottom, weight=1)
         self._alerts = []
+
+    def _use_homenet(self):
+        from .realtime import HNG_DEFAULT_PATH
+        if not Path(HNG_DEFAULT_PATH).exists():
+            messagebox.showwarning("HomeNet Guard", "HomeNet Guard's alert file wasn't found:\n"
+                                   f"{HNG_DEFAULT_PATH}\n\nStart CAS HomeNet Guard (it creates the file "
+                                   "when it raises its first alert), or use 'Sample: HomeNet Guard' to try it.")
+            return
+        self.mon_file.set(HNG_DEFAULT_PATH)
+        self.mon_opts["follow"].set(True)
+        self.mon_opts["from_start"].set(True)
+        self._start_monitor()
+
+    def _copy_for_iphone(self):
+        import shutil
+        src = Path(self.mon_file.get().strip())
+        if not src.exists():
+            messagebox.showwarning("Copy for iPhone", "Choose a log file first.")
+            return
+        home = Path.home()
+        start = next((d for d in (home / "iCloudDrive", home / "OneDrive", home / "Documents") if d.exists()), home)
+        dest = filedialog.asksaveasfilename(title="Save a copy where your iPhone can see it (iCloud Drive or OneDrive)",
+                                            initialdir=str(start), initialfile=src.name,
+                                            filetypes=[("Log files", "*.jsonl *.log *.txt"), ("All files", "*.*")])
+        if dest:
+            shutil.copyfile(src, dest)
+            messagebox.showinfo("Copied", f"Saved to {dest}.\n\nOn your iPhone: CAS Cortex > Monitor > Open file... "
+                                          "and pick it from the Files app.")
 
     def _browse_log(self):
         f = filedialog.askopenfilename(title="Choose a log file",
@@ -989,7 +1024,7 @@ class CortexApp(tk.Tk):
         a = self._alerts[int(sel[0][1:]) - 1]
         advice = {"P1": "Act now.", "P2": "Investigate today.", "P3": "Review when convenient.", "P4": "Log and monitor."}
         txt = (f"{a['priority']}  {a['kind']}  -  {a['entity']}   (risk score {a['score']})\n"
-               f"{a['detail']}\nSuggested response: {advice[a['priority']]}")
+               f"{a['detail']}\nSuggested response: {a.get('advice') or advice[a['priority']]}")
         if a.get("assessment"):
             txt += "\n\nAI assessment:\n" + a["assessment"]
         self.alert_text.delete("1.0", "end")

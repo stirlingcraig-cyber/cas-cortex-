@@ -49,6 +49,34 @@ def random_events(seed=7, n=600):
     return "\n".join(lines)
 
 
+def random_hng(seed=11, n=400):
+    rng = random.Random(seed)
+    srcs = [("ThreatIntel", "Device contacted a known malicious server"), ("Signature", "Log4Shell probe [SIG-010]"),
+            ("Anomaly", "Possible command-and-control beaconing"), ("Anomaly", "Port scan detected"),
+            ("Anomaly", "Worm-like scanning from a home device"), ("Anomaly", "Unusual upload volume"),
+            ("Anomaly", "Suspicious program connection"), ("Anomaly", "Odd thing"),
+            ("DeviceAudit", "New device joined your network"), ("DeviceAudit", "High-risk service exposed on a device"),
+            ("System", "Feeds updated")]
+    lines, t = [], 1763380000
+    for i in range(n):
+        t += rng.choice([5, 60, 900, 3600, 20000])
+        src, title = rng.choice(srcs)
+        frac = rng.choice(["", ".1", ".1234567", ".500"])
+        tz = rng.choice(["Z", "Z", "+01:00", "-05:30", ""])
+        from datetime import datetime, timezone
+        stamp = datetime.fromtimestamp(t, timezone.utc).strftime("%Y-%m-%dT%H:%M:%S") + frac + tz
+        sev = rng.choice(["Info", "Low", "Medium", "High", "Critical", 2, 4])
+        lines.append(json.dumps({"Id": str(i), "TimeUtc": stamp, "Severity": sev, "Source": src, "Title": title,
+                                 "Detail": rng.choice(["", "detail text"]),
+                                 "LocalIp": rng.choice(["192.168.1.5", "192.168.1.6", None]),
+                                 "RemoteIp": rng.choice(["8.8.4.4", None]), "RemotePort": rng.choice([None, 23, 443]),
+                                 "Recommendation": rng.choice([None, "Do this."]),
+                                 "Status": rng.choice(["Open", "Open", "Blocked", "Ignored", "Resolved"]),
+                                 "HighConfidence": rng.random() < 0.3}))
+    lines += ["[1, 2]", "{\"TimeUtc\": \"bad\", \"Title\": \"x\", \"Severity\": \"High\", \"Source\": \"Anomaly\"}"]
+    return "\n".join(lines)
+
+
 def py_alerts(text, crit):
     m = ThreatMonitor(out=quiet, criticality=crit)
     for line in text.splitlines():
@@ -57,10 +85,11 @@ def py_alerts(text, crit):
 
 
 @pytest.mark.skipif(NODE is None, reason="node not installed")
-@pytest.mark.parametrize("name", ["sample_auth.log", "events.jsonl", "random"])
+@pytest.mark.parametrize("name", ["sample_auth.log", "events.jsonl", "homenet_guard_alerts.jsonl", "random", "random_hng"])
 def test_js_engine_matches_python(tmp_path, name):
-    text = random_events() if name == "random" else (ROOT / "examples" / name).read_text()
-    crit = {"203.0.113.7": 3, "PC3": 1}
+    text = (random_events() if name == "random" else random_hng() if name == "random_hng"
+            else (ROOT / "examples" / name).read_text())
+    crit = {"203.0.113.7": 3, "PC3": 1, "192.168.1.12": 3, "192.168.1.6": 1}
     src = tmp_path / "in.txt"
     src.write_text(text)
     script = f"""
@@ -72,6 +101,8 @@ console.log(JSON.stringify({{events: m.events, alerts: m.alerts.map(a => [a.kind
 """
     out = json.loads(subprocess.run([NODE, "-e", script], capture_output=True, text=True, check=True).stdout)
     want, events = py_alerts(text, crit)
+    if name == "random_hng":  # one malformed-time line gets "now" as its time on each side; compare the rest
+        want, out["alerts"] = [w for w in want if "bad" not in w[4]], [a for a in out["alerts"] if "bad" not in a[4]]
     assert out["events"] == events
     assert [tuple(a) for a in out["alerts"]] == want
     assert len(want) > 0
@@ -125,3 +156,61 @@ def test_publish_explains_when_not_connected(tmp_path, trained_home):
     assert not publish(trained_home, out=msgs.append, cwd=work)
     assert any("connect_github.bat" in m for m in msgs)
     assert (work / "docs" / "data" / "status.json").exists()
+
+
+def test_homenet_guard_alerts():
+    from cortex.realtime import hng_time
+    from datetime import datetime, timezone
+    base = datetime(2026, 11, 17, 18, 0, tzinfo=timezone.utc).timestamp()
+    assert hng_time("2026-11-17T18:00:00.1234567Z") == pytest.approx(base + 0.123)
+    assert hng_time("2026-11-17T19:00:00+01:00") == base
+    assert hng_time("2026-11-17T18:00:00") == base
+    assert hng_time("nope") is None
+    m = ThreatMonitor(out=quiet, criticality={"192.168.1.12": 3})
+    for line in (ROOT / "examples" / "homenet_guard_alerts.jsonl").read_text().splitlines():
+        m.feed(line)
+    got = [(a["kind"], a["entity"], a["priority"]) for a in m.alerts]
+    assert ("multi_signal_device", "192.168.1.47", "P1") in got
+    assert ("malicious_server", "192.168.1.12", "P1") in got
+    assert not any(k == "data_exfiltration" for k, _, _ in got)      # Ignored in HomeNet Guard
+    assert not any(k == "system" for k, _, _ in got)                 # Info-level
+    assert all(a.get("advice") for a in m.alerts)
+    assert len([a for a in m.alerts if a["kind"] == "multi_signal_device"]) == 1
+
+
+def test_live_watch_survives_homenet_rewrites(tmp_path):
+    """HomeNet Guard appends, then sometimes replaces the whole file. Cortex must not hold the
+    file open (Windows would block the replace) and must not double-count rewritten alerts."""
+    import threading, time as _t
+    from cortex.realtime import follow
+    src = (ROOT / "examples" / "homenet_guard_alerts.jsonl").read_text().splitlines()
+    f = tmp_path / "alerts.jsonl"
+    f.write_text("\n".join(src[:3]) + "\n")
+    m = ThreatMonitor(out=quiet)
+    stop = {"now": False}
+
+    def kill():
+        if stop["now"]:
+            raise SystemExit
+    th = threading.Thread(target=lambda: _swallow(follow, f, m, True, kill, 0.05), daemon=True)
+    th.start()
+    _t.sleep(0.4)
+    with f.open("a") as fh:                      # HomeNet Guard appends two alerts...
+        fh.write("\n".join(src[3:5]) + "\n")
+    _t.sleep(0.4)
+    tmp = tmp_path / "alerts.tmp"                # ...then rewrites the file (status change)
+    tmp.write_text("\n".join(src[1:]) + "\n")
+    tmp.replace(f)                               # would fail on Windows if the file were held open
+    _t.sleep(0.5)
+    stop["now"] = True
+    th.join(2)
+    kinds = [a["kind"] for a in m.alerts]
+    assert kinds.count("new_device") == 1 and kinds.count("worm_scanning") == 1
+    assert "exploit_attempt" in kinds and kinds.count("multi_signal_device") == 1
+
+
+def _swallow(fn, *a):
+    try:
+        fn(*a)
+    except SystemExit:
+        pass

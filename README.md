@@ -93,6 +93,22 @@ Training stays on the PC because it needs the local AI model. To send results to
 
 Only learning data is published. **Alerts and log contents are never published**, because the repo is public.
 
+## CAS HomeNet Guard integration
+
+Cortex reads HomeNet Guard's alert file (`C:\ProgramData\CAS Solutions\HomeNetGuard\alerts.jsonl`) directly:
+
+* **Desktop app:** Threat Monitor tab → **Watch its alerts live**. The command-line equivalent is `.\cortex watch --homenet`.
+* **iPhone:** Threat Monitor tab → **Copy log for iPhone...**, save it to iCloud Drive or OneDrive, then in the
+  iPhone app go to Monitor → **Open file…**.
+
+What Cortex adds:
+* Every HomeNet Guard alert gets a P1–P4 rank from its severity, confidence, the type of threat and how important
+  the device is (*Critical assets*). Ignored, resolved and info-only alerts are skipped; blocked ones are marked.
+* **Multi-signal escalation:** a home device with 3 or more different warning signs within 24 hours (e.g. new
+  device + exposed Telnet + beaconing) raises a P1 *Device showing multiple compromise signs*.
+* HomeNet Guard's own recommendation is shown as the suggested response.
+* Live watching never holds the file open, so HomeNet Guard can keep updating it; rewritten alerts aren't counted twice.
+
 ## Install (Windows) — free, local, no API key
 
 **Easiest:** unzip, open the `cas-cortex` folder, double-click **`setup.bat`**.

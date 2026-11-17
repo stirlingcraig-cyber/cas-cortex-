@@ -27,7 +27,43 @@
     beaconing: [4, 4, "moderate"],
     impossible_travel: [3, 4, "moderate"],
     suspicious_process: [4, 4, "moderate"],
+    multi_signal_device: [5, 5, "severe"],
   };
+
+  /* ---- CAS HomeNet Guard alerts (alerts.jsonl written by the Windows app) ---- */
+  const HNG_SEVERITY = { Info: 0, Low: 1, Medium: 2, High: 3, Critical: 4 };
+  const HNG_HARM = { 4: "severe", 3: "moderate", 2: "minor", 1: "none", 0: "none" };
+  const HNG_IMPACT = { malicious_server: 5, exploit_attempt: 4, c2_beaconing: 4, port_scan: 3, worm_scanning: 5,
+    data_exfiltration: 5, suspicious_program: 4, new_device: 2, exposed_service: 4, device_risk: 3,
+    network_anomaly: 3, system: 2 };
+  const MULTI_WINDOW = 24 * 3600, MULTI_KINDS = 3;
+  const HNG_TS = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?(Z|[+-]\d{2}:\d{2})?$/;
+
+  function hngTime(s) {
+    const m = HNG_TS.exec(String(s || ""));
+    if (!m) return null;
+    let t = Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]) / 1000;
+    if (m[8] && m[8] !== "Z") {
+      const sign = m[8][0] === "+" ? 1 : -1;
+      t -= sign * (parseInt(m[8].slice(1, 3), 10) * 3600 + parseInt(m[8].slice(4, 6), 10) * 60);
+    }
+    if (m[7]) t += parseInt((m[7].slice(0, 3) + "000").slice(0, 3), 10) / 1000;
+    return t;
+  }
+
+  function hngKind(e) {
+    const src = String(e.Source || ""), title = String(e.Title || "").toLowerCase();
+    if (src === "ThreatIntel" || title.includes("malicious server")) return "malicious_server";
+    if (src === "Signature") return "exploit_attempt";
+    if (src === "DeviceAudit") return title.includes("new device") ? "new_device" : title.includes("service") ? "exposed_service" : "device_risk";
+    if (src === "Anomaly") {
+      for (const [k, kind] of [["beacon", "c2_beaconing"], ["port scan", "port_scan"], ["worm", "worm_scanning"],
+                               ["upload", "data_exfiltration"], ["program", "suspicious_program"]])
+        if (title.includes(k)) return kind;
+      return "network_anomaly";
+    }
+    return "system";
+  }
   const ADVICE = { P1: "Act now.", P2: "Investigate today.", P3: "Review when convenient.", P4: "Log and monitor." };
   const TITLES = {
     bruteforce: "Brute-force login attempts",
@@ -35,6 +71,7 @@
     beaconing: "Possible malware beaconing",
     impossible_travel: "Impossible travel",
     suspicious_process: "Suspicious command line",
+    multi_signal_device: "Device showing multiple compromise signs",
   };
 
   // Format numbers like Python's repr(float) so phone and PC alerts read identically.
@@ -82,12 +119,16 @@
     line = (line || "").trim();
     if (!line) return null;
     if (line[0] === "{") {
-      try {
-        const e = JSON.parse(line);
-        if (!e || typeof e !== "object" || !("type" in e)) return null;
-        if (e.ts === undefined) e.ts = Date.now() / 1000;
-        return e;
-      } catch (_) { return null; }
+      let e;
+      try { e = JSON.parse(line); } catch (_) { return null; }
+      if (!e || typeof e !== "object" || Array.isArray(e)) return null;
+      if ("TimeUtc" in e && "Title" in e && "Severity" in e) {        // CAS HomeNet Guard alert
+        const ts = hngTime(e.TimeUtc);
+        return Object.assign({}, e, { type: "hng_alert", ts: ts === null ? Date.now() / 1000 : ts });
+      }
+      if (!("type" in e)) return null;
+      if (e.ts === undefined) e.ts = Date.now() / 1000;
+      return e;
     }
     let ts = Date.now() / 1000;
     const m = SYSLOG_TS.exec(line);
@@ -109,6 +150,7 @@
       this.fails = new Map(); this.recentBurst = new Map(); this.conns = new Map();
       this.beaconAlerted = new Set(); this.lastLogin = new Map();
       this.alerts = []; this.events = 0; this.seq = 0;
+      this.hngSeen = new Map(); this.hngEscalated = new Map(); this.hngIds = new Set();
     }
     feed(line) {
       const e = parseLine(line);
@@ -157,16 +199,50 @@
       } else if (t === "process" && e.cmdline) {
         const ind = cmdIndicators(e.cmdline);
         if (ind.length) out.push(this.alert("suspicious_process", e.source || "?", e.ts, "indicators: " + ind.join(", ")));
+      } else if (t === "hng_alert") {
+        if (e.Id && this.hngIds.has(e.Id)) { this.events--; return []; }
+        if (e.Id) this.hngIds.add(e.Id);
+        out.push(...this.homenet(e));
       }
       return out;
     }
-    alert(kind, entity, ts, detail) {
+    homenet(e) {
+      const status = String(e.Status ?? "Open");
+      let sev = e.Severity;
+      sev = Number.isInteger(sev) ? sev : (HNG_SEVERITY[String(sev)] ?? 2);
+      if (status === "Ignored" || status === "Resolved" || sev <= 0) return [];
+      const kind = hngKind(e);
+      const local = e.LocalIp || "", remote = e.RemoteIp || "";
+      const entity = local || remote || "?";
+      const L = Math.min(5, sev + 1 + (e.HighConfidence ? 1 : 0));
+      let detail = String(e.Title ?? "");
+      if (e.Detail) detail += " - " + e.Detail;
+      if (remote && remote !== entity) detail += ` (remote ${remote}` + (e.RemotePort ? `:${e.RemotePort}` : "") + ")";
+      if (status === "Blocked") detail += " [already blocked by HomeNet Guard]";
+      const out = [this.alert(kind, entity, e.ts, detail, [L, HNG_IMPACT[kind], HNG_HARM[sev]], e.Recommendation || null, e.Title)];
+      if (local) {
+        const hist = this.hngSeen.get(local) || [];
+        hist.push([e.ts, kind]);
+        while (hist.length && e.ts - hist[0][0] > MULTI_WINDOW) hist.shift();
+        this.hngSeen.set(local, hist);
+        const kinds = [...new Set(hist.map(h => h[1]))].sort();
+        const last = this.hngEscalated.get(local);
+        if (kinds.length >= MULTI_KINDS && (last === undefined || e.ts - last > MULTI_WINDOW)) {
+          this.hngEscalated.set(local, e.ts);
+          out.push(this.alert("multi_signal_device", local, e.ts,
+            `${kinds.length} different warning signs within 24h: ` + kinds.join(", "), null,
+            "Treat this device as compromised: disconnect it from the network, then factory-reset it or run a full malware scan before reconnecting."));
+        }
+      }
+      return out;
+    }
+    alert(kind, entity, ts, detail, profile, advice, title) {
       this.seq++;
-      const [L, I, harm] = RISK_PROFILE[kind];
+      const [L, I, harm] = profile || RISK_PROFILE[kind];
       const crit = Math.max(1, Math.min(3, parseInt(this.criticality[entity] || 2, 10)));
       const pr = prioritise(L, I, crit, harm);
-      const a = { id: "A" + this.seq, ts, kind, title: TITLES[kind], entity, detail,
-                  score: pr.score, priority: pr.priority, advice: ADVICE[pr.priority] };
+      const a = { id: "A" + this.seq, ts, kind, title: title || TITLES[kind], entity, detail,
+                  score: pr.score, priority: pr.priority, advice: advice || ADVICE[pr.priority] };
       this.alerts.push(a);
       return a;
     }
