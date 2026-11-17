@@ -77,6 +77,8 @@ nav button.on{color:var(--teal)}
       <div class="card stat"><div class="k">Lessons</div><div class="v" id="s-lessons">–</div></div>
     </div>
     <div class="card"><div class="muted" id="s-model">AI model: –</div><div class="muted" id="s-pub">Last published: –</div></div>
+    <h3>Your focus (learned)</h3>
+    <div class="card" id="focus"><span class="muted">–</span></div>
     <h3>What you can do here</h3>
     <div class="card">
       <div class="item"><b>Threat Monitor</b><div class="muted">Open your CAS HomeNet Guard alerts (or any supported log) and get prioritised P1–P4 alerts, including devices showing several compromise signs. Runs entirely on your iPhone - nothing is uploaded.</div></div>
@@ -113,6 +115,10 @@ nav button.on{color:var(--teal)}
       </div>
       <button class="btn" onclick="analyse()">Analyse</button>
     </div>
+    <div class="card"><b>Teach Cortex from your answers</b>
+      <div class="muted" id="fb-count" style="margin-top:4px"></div>
+      <div class="muted" style="margin-top:4px">Open an alert and tap Useful, False alarm or I acted on it. Cortex adjusts future rankings here straight away; send it to your PC to teach the main Cortex too.</div>
+      <button class="btn small ghost" onclick="exportFeedback()">Send feedback to PC…</button></div>
     <div class="chips" id="chips"></div>
     <div id="alerts"></div>
     <p class="muted" id="mon-summary"></p>

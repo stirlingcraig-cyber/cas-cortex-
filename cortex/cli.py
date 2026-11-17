@@ -139,6 +139,105 @@ def cmd_add_pack(rt, a):
     rt.audit.write("task_pack_added", pack=src.stem, tasks=[t["id"] for t in new])
 
 
+def cmd_import_claude(rt, a):
+    from . import claude_history as ch
+    mem = rt.memory(read_only=True)
+    r = ch.import_export(rt.cfg.home, Path(a.export), {s.name for s in mem.all_skills()})
+    rt.audit.write("claude_history_imported", conversations=r["conversations"], new_proposals=r["new_proposals"])
+    print(f"Read {r['conversations']} conversations (processed on this PC only).")
+    print("Topics: " + ", ".join(f"{d} {n}" for d, n in sorted(r["by_domain"].items(), key=lambda kv: -kv[1])))
+    print(f"{r['new_proposals']} new skill proposal(s) from code Claude wrote for you "
+          f"({r['total_proposals']} in total). Review them: cortex proposals")
+
+
+def cmd_proposals(rt, a):
+    from . import claude_history as ch
+    if a.approve:
+        n = ch.set_status(rt.cfg.home, "all-new" if a.approve == ["all"] else a.approve, "approved")
+        print(f"Approved {n} proposal(s). Learn them now with: cortex learn-proposal <id>  (or let autopilot do it)")
+        return
+    if a.dismiss:
+        print(f"Dismissed {ch.set_status(rt.cfg.home, a.dismiss, 'dismissed')} proposal(s).")
+        return
+    props = ch.load_proposals(rt.cfg.home)
+    if not props:
+        print("No proposals yet. Import your Claude export first: cortex import-claude <export.zip>")
+    for p in props:
+        if p["status"] != "dismissed" or a.all:
+            print(f"{p['id']}  {p['status']:<9} {p['domain']:<8} {p['name']:<28} from '{p['title'][:40]}' {p['date']}")
+
+
+def cmd_learn_proposal(rt, a):
+    from . import claude_history as ch
+    props = {p["id"]: p for p in ch.load_proposals(rt.cfg.home)}
+    p = props.get(a.id)
+    if not p:
+        sys.exit(f"No proposal {a.id}. See: cortex proposals")
+    mem = rt.memory()
+    try:
+        o = rt.agent(mem).solve_freeform(p["spec"], p["name"], p["domain"], p["title"], reference_code=p["reference_code"])
+    except RuntimeError as e:
+        ch.set_status(rt.cfg.home, [p["id"]], "failed")
+        sys.exit(f"Couldn't learn '{p['name']}': {e}")
+    ch.set_status(rt.cfg.home, [p["id"]], "learned" if o.solved else "failed")
+    print(f"\n{'LEARNED' if o.solved else 'not learned'} `{p['name']}` (reference-checked); skill: {o.skill_action or '-'}")
+    if not o.solved:
+        sys.exit(1)
+
+
+def cmd_feedback(rt, a):
+    from . import feedback as fb
+    from .autopilot import add_phone_usage
+    if a.import_file:
+        n, usage = fb.import_file(rt.cfg.home, Path(a.import_file))
+        add_phone_usage(rt.cfg.home, usage)
+        rt.audit.write("feedback_imported", items=n)
+        print(f"Imported {n} new feedback item(s) from the iPhone.")
+        return
+    if a.reset:
+        fb.reset(rt.cfg.home)
+        rt.audit.write("feedback_reset")
+        print("Feedback reset (a backup was kept as feedback.jsonl.bak).")
+        return
+    recs = fb.load(rt.cfg.home)
+    print(f"{len(recs)} piece(s) of feedback.")
+    for line in fb.describe(fb.summarise(recs)) or ["No adjustments learned yet."]:
+        print("  " + line)
+
+
+def cmd_focus(rt, a):
+    from .autopilot import focus
+    f = focus(rt.cfg.home)
+    if not f["weights"]:
+        print("No usage yet - Cortex learns your focus as you use it.")
+    for d, w in sorted(f["weights"].items(), key=lambda kv: -kv[1]):
+        print(f"  {d:<8} {'#' * int(w * 40):<40} {w:.0%}")
+    print("Next autopilot training: " + ", ".join(f["next_training"]))
+
+
+def cmd_autopilot(rt, a):
+    from . import autopilot
+    from .gui_backend import ollama_state
+    log_path = rt.cfg.home / "autopilot.log"
+
+    def log(msg):
+        line = time.strftime("%Y-%m-%d %H:%M:%S ") + msg
+        print(line)
+        with log_path.open("a", encoding="utf-8") as f:
+            f.write(line + "\n")
+
+    def ready():
+        if rt.cfg.provider != "ollama":
+            return True
+        online, has = ollama_state(rt.cfg.ollama_url, rt.cfg.model)
+        return online and has
+    rt.kill.check()
+    rt.audit.write("autopilot_start")
+    rep = autopilot.run(rt.cfg.home, ready, ["--home", str(rt.cfg.home)], log=log, rounds=a.rounds)
+    rt.audit.write("autopilot_end", trained=rep["trained"], learned=len(rep["learned"]),
+                   feedback=rep["feedback_imported"], published=rep["published"])
+
+
 def cmd_gui(rt, a):
     from .gui import main as gui_main
     gui_main(str(rt.cfg.home))
@@ -253,7 +352,9 @@ def cmd_watch(rt, a):
     elif not a.file:
         sys.exit("Give a log file (or - for stdin), or use --homenet")
     learned = load_learned(rt.memory(read_only=True).skill_code_map()) if a.use_learned else {}
+    from . import feedback as fb
     mon = ThreatMonitor(fail_count=a.fail_count, fail_window=a.fail_window, criticality=crit,
+                        feedback=fb.summarise(fb.load(rt.cfg.home)),
                         learned=learned, triage=make_triage(rt.llm) if a.triage else None,
                         alerts_path=rt.cfg.home / "alerts.jsonl")
     if learned:
@@ -345,6 +446,21 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--no-push", action="store_true", help="only write docs/data/status.json")
     s = sub.add_parser("add-pack", help="add a ready-made task pack, e.g. automotive")
     s.add_argument("pack", help="pack name (automotive) or path to a pack .json")
+    s = sub.add_parser("import-claude", help="learn from your Claude data export (processed locally)")
+    s.add_argument("export", help="the export .zip (or conversations.json)")
+    s = sub.add_parser("proposals", help="skill proposals from your Claude history")
+    s.add_argument("--approve", nargs="+", metavar="ID", help="approve proposal IDs, or 'all'")
+    s.add_argument("--dismiss", nargs="+", metavar="ID")
+    s.add_argument("--all", action="store_true", help="include dismissed")
+    s = sub.add_parser("learn-proposal", help="learn one approved proposal now")
+    s.add_argument("id"); s.add_argument("--attempts", type=int)
+    s = sub.add_parser("feedback", help="what Cortex has learned from your alert feedback")
+    s.add_argument("--import", dest="import_file", metavar="FILE", help="import an iPhone feedback file")
+    s.add_argument("--reset", action="store_true")
+    sub.add_parser("focus", help="what Cortex has learned about your focus")
+    s = sub.add_parser("autopilot", help="one pass of continuous learning (used by the nightly task)")
+    s.add_argument("--rounds", type=int, default=1)
+    s.add_argument("--max-calls", type=int)
     sub.add_parser("check-sandbox", help="test that agent code can run on this PC (no AI needed)")
     s = sub.add_parser("doctor", help="check setup, choose a local model for your PC, download it")
     s.add_argument("--pull", action="store_true", help="download the model if missing")
@@ -386,7 +502,9 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
-COMMANDS = {"status": cmd_status, "doctor": cmd_doctor, "gui": cmd_gui, "check-sandbox": cmd_check_sandbox, "publish": cmd_publish, "add-pack": cmd_add_pack, "tasks": cmd_tasks, "train": cmd_train, "eval": cmd_eval,
+COMMANDS = {"status": cmd_status, "doctor": cmd_doctor, "gui": cmd_gui, "check-sandbox": cmd_check_sandbox, "publish": cmd_publish, "add-pack": cmd_add_pack, "import-claude": cmd_import_claude,
+            "proposals": cmd_proposals, "learn-proposal": cmd_learn_proposal, "feedback": cmd_feedback,
+            "focus": cmd_focus, "autopilot": cmd_autopilot, "tasks": cmd_tasks, "train": cmd_train, "eval": cmd_eval,
             "solve": cmd_solve, "learn": cmd_learn, "skills": cmd_skills, "memory": cmd_memory,
             "report": cmd_report, "watch": cmd_watch, "lock": cmd_lock, "verify": cmd_verify,
             "stop": cmd_stop, "resume": cmd_resume}

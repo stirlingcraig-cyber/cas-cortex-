@@ -57,12 +57,26 @@ def build_status(home: Path) -> dict:
                         for r in q("SELECT domain, text, uses FROM lessons ORDER BY uses DESC, id DESC LIMIT ?")],
             "knowledge": [[r["subject"], r["relation"], r["object"]]
                           for r in q("SELECT subject, relation, object FROM triples ORDER BY ts DESC LIMIT ?")],
+            "focus": _focus(home),
+            "feedback": _feedback(home),
             "recent_episodes": [{"ts": r["ts"], "task": r["task_id"], "mode": r["mode"], "solved": bool(r["solved"]),
                                  "attempts": r["attempts"]}
                                 for r in q("SELECT ts, task_id, mode, solved, attempts FROM episodes ORDER BY id DESC LIMIT ?", 30)],
         }
     finally:
         mem.close()
+
+
+def _focus(home):
+    from .autopilot import focus
+    return focus(home)
+
+
+def _feedback(home):
+    """Kind-level counts and record ids only - never IPs, device names or VINs."""
+    from . import feedback
+    recs = feedback.load(home)
+    return {"kinds": feedback.kind_summary(recs), "ids": [r["id"] for r in recs if r.get("id")][-2000:]}
 
 
 def write_status(home: Path, path: Path = STATUS_PATH) -> Path:

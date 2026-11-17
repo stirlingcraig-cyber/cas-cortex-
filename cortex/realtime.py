@@ -179,8 +179,9 @@ def load_learned(skill_code: dict[str, str]) -> dict:
 class ThreatMonitor:
     def __init__(self, fail_count: int = 5, fail_window: int = 60, criticality: dict | None = None,
                  learned: dict | None = None, triage=None, alerts_path: Path | None = None,
-                 out=print):
+                 out=print, feedback: dict | None = None):
         self.fail_count, self.fail_window = fail_count, fail_window
+        self.feedback = feedback or {}
         self.criticality = criticality or {}
         self.fn = dict(LEARNABLE)
         self.fn.update(learned or {})
@@ -341,6 +342,11 @@ class ThreatMonitor:
              "score": pr["score"], "priority": pr["priority"]}
         if advice:
             a["advice"] = advice
+        if self.feedback:
+            from .feedback import adjust
+            a["priority"], why = adjust(a["priority"], kind, entity, self.feedback)
+            if why:
+                a["learned"] = why
         if self.triage and a["priority"] in ("P1", "P2"):
             try:
                 a["assessment"] = self.triage(a)
@@ -353,7 +359,8 @@ class ThreatMonitor:
             with Path(self.alerts_path).open("a", encoding="utf-8") as f:
                 f.write(json.dumps(a) + "\n")
         when = datetime.fromtimestamp(ts).strftime("%H:%M:%S")
-        self.out(f"[{a['priority']}] {when} {kind:<24} {entity:<18} score={a['score']:<3} {detail}")
+        self.out(f"[{a['priority']}] {when} {kind:<24} {entity:<18} score={a['score']:<3} {detail}"
+                 + (f"  ({a['learned']})" if a.get("learned") else ""))
         if "assessment" in a:
             for line in a["assessment"].strip().splitlines():
                 self.out(f"       {line}")

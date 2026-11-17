@@ -245,18 +245,28 @@ class CortexAgent:
         return lesson, r.tokens
 
     # ---------------------------------------------------- self-generated work
-    def solve_freeform(self, spec: str, entry_point: str, domain: str, title: str = "") -> Outcome:
+    def solve_freeform(self, spec: str, entry_point: str, domain: str, title: str = "",
+                       reference_code: str | None = None) -> Outcome:
         """Learn a brand-new capability from a plain-English spec: write tests first,
-        then the code. Resulting skills are marked 'self-tested' (lower trust)."""
+        then the code. Resulting skills are marked 'self-tested' (lower trust). With
+        reference_code (e.g. a function from your Claude history) only tests the reference
+        passes are kept, and the skill is marked 'reference-checked'."""
         r = self.llm.complete(TESTGEN_SYSTEM, [{"role": "user", "content":
                               f"Specification for `{entry_point}`:\n{spec}"}], max_tokens=2500)
         data = extract_json(r.text) or {}
         tests = [t for t in data.get("tests", []) if isinstance(t, str) and entry_point in t]
+        trust = "self-tested"
+        if reference_code:
+            from .claude_history import filter_tests_with_reference
+            before = len(tests)
+            tests = filter_tests_with_reference(tests, reference_code, self.timeout)
+            self.log(f"  kept {len(tests)} of {before} self-tests that your original function passes")
+            trust = "reference-checked"
         if len(tests) < 3:
             raise RuntimeError("could not generate a usable test suite for this spec")
         self.log(f"  generated {len(tests)} self-tests")
         view = TaskView(id=f"adhoc.{entry_point}", domain=domain, title=title or entry_point,
                         entry_point=entry_point, prompt=spec, visible_tests=tuple(tests))
-        out = self.solve(view, mode="adhoc", trust="self-tested")
+        out = self.solve(view, mode="adhoc", trust=trust)
         out.tokens += r.tokens
         return out

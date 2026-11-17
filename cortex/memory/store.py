@@ -103,7 +103,7 @@ class Memory:
         a skill is only replaced when the newcomer has stronger verification."""
         now = time.time()
         old = self.get_skill(name)
-        rank = {"self-tested": 0, "verified-visible": 1}
+        rank = {"self-tested": 0, "reference-checked": 1, "verified-visible": 2}
         if old is None:
             self._write("""INSERT INTO skills VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
                         (name, domain, description, code, json.dumps(list(tests)), trust,

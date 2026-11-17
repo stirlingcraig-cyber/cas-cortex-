@@ -26,7 +26,8 @@ PRIO = {"P1": ("#FDE2E1", RED), "P2": ("#FFEFD5", AMBER), "P3": ("#FFF9DB", "#8A
 DOMAIN_LABELS = {"All areas": None, "Coding": "coding", "Cyber security": "cyber",
                  "Big data": "bigdata", "Threat, risk & harm": "threat"}
 IPHONE_URL = "https://stirlingcraig-cyber.github.io/cas-cortex-/"
-TABS = ["Home", "Setup", "Train", "Progress", "Skills & Memory", "Teach", "Threat Monitor", "Safety", "Help"]
+TABS = ["Home", "Setup", "Train", "Progress", "Skills & Memory", "Teach", "Threat Monitor", "Learn from You",
+        "Safety", "Help"]
 
 
 def ui_font(size=10, weight="normal"):
@@ -139,7 +140,8 @@ class CortexApp(tk.Tk):
             self.nb.add(f, text=f"  {name}  ")
             self.pages[name] = f
         self.build_home(); self.build_setup(); self.build_train(); self.build_progress()
-        self.build_memory(); self.build_teach(); self.build_monitor(); self.build_safety(); self.build_help()
+        self.build_memory(); self.build_teach(); self.build_monitor(); self.build_learn(); self.build_safety()
+        self.build_help()
         self.nb.bind("<<NotebookTabChanged>>", self._on_tab)
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         self.after(100, self._poll)
@@ -216,13 +218,14 @@ class CortexApp(tk.Tk):
         name = TABS[self.nb.index(self.nb.select())]
         refresh = {"Home": self.refresh_home, "Progress": self.refresh_progress,
                    "Skills & Memory": self.refresh_memory, "Teach": self.refresh_teach,
-                   "Safety": self.refresh_safety, "Train": self.refresh_train}.get(name)
+                   "Safety": self.refresh_safety, "Train": self.refresh_train,
+                   "Learn from You": self.refresh_learn}.get(name)
         if refresh:
             refresh()
 
     def refresh_all(self):
         for f in (self.refresh_home, self.refresh_train, self.refresh_progress, self.refresh_memory,
-                  self.refresh_teach, self.refresh_safety):
+                  self.refresh_teach, self.refresh_safety, self.refresh_learn):
             try:
                 f()
             except Exception as e:  # never let one panel break the app
@@ -569,6 +572,7 @@ class CortexApp(tk.Tk):
         d = DOMAIN_LABELS[self.train_dom.get()]
         if d:
             args += ["--domain", d]
+        be.bump_usage(self.home, f"train:{d or 'all'}")
         self._train_stats = {"done": 0, "solved": 0}
         self.train_info.configure(text="Starting...")
         self.run("train", args, self.train_con, label="Training...", done=lambda rc: self.refresh_all())
@@ -842,6 +846,7 @@ class CortexApp(tk.Tk):
             return
         spec_file = self.home / "last_spec.txt"
         spec_file.write_text(spec, encoding="utf-8")
+        be.bump_usage(self.home, f"learn:{DOMAIN_LABELS[self.learn_dom.get()]}")
         self.run("learn", ["learn", f"@{spec_file}", "--name", name, "--domain",
                            DOMAIN_LABELS[self.learn_dom.get()], "--attempts", str(self.attempts.get())],
                  self.teach_con, label="Learning...", done=lambda rc: self.refresh_all())
@@ -940,6 +945,11 @@ class CortexApp(tk.Tk):
         self.alert_text.pack(fill="both", expand=True, pady=(6, 0))
         self.alert_text.insert("1.0", "Select an alert to see details and the AI assessment (if triage is on).\n\n"
                                       "P1 act now  |  P2 investigate today  |  P3 review when convenient  |  P4 log and monitor")
+        fbrow = ttk.Frame(bottom, style="Page.TFrame"); fbrow.pack(fill="x", pady=(4, 0))
+        ttk.Label(fbrow, text="Teach Cortex about the selected alert:").pack(side="left")
+        for label, verdict in (("Useful", "useful"), ("False alarm", "false_alarm"), ("I acted on it", "acted")):
+            ttk.Button(fbrow, text=label, command=lambda v=verdict: self._feedback(v)).pack(side="left", padx=(6, 0))
+        self.fb_note = ttk.Label(fbrow, text="", style="Muted.TLabel"); self.fb_note.pack(side="left", padx=10)
         self.mon_con = Console(bottom, height=4)
         self.mon_con.pack(fill="x", pady=(6, 0))
         pw.add(tf, weight=3); pw.add(bottom, weight=1)
@@ -1011,6 +1021,7 @@ class CortexApp(tk.Tk):
         crit = self.mon_crit.get().split()
         if crit:
             args += ["--critical"] + crit
+        be.bump_usage(self.home, be.monitor_source_key(f))
         apath = self.home / "alerts.jsonl"
         self._monitor_offset = apath.stat().st_size if apath.exists() else 0
         self.run("monitor", args, self.mon_con, exclusive=False, label="Monitoring...",
@@ -1042,6 +1053,18 @@ class CortexApp(tk.Tk):
         for p, l in self.prio_chips.items():
             l.configure(text=f"{p}: {counts[p]}")
 
+    def _feedback(self, verdict):
+        from . import feedback as fb
+        sel = self.alert_tree.selection()
+        if not sel:
+            self.fb_note.configure(text="Select an alert first.")
+            return
+        a = self._alerts[int(sel[0][1:]) - 1]
+        fb.add(self.home, a["kind"], a["entity"], verdict)
+        n = len(fb.load(self.home))
+        self.fb_note.configure(text=f"Saved ({verdict.replace('_', ' ')}). Cortex has {n} piece(s) of feedback.")
+        self.set_status("Feedback saved - future alerts like this will be ranked accordingly")
+
     def _alert_detail(self, _=None):
         sel = self.alert_tree.selection()
         if not sel:
@@ -1050,6 +1073,8 @@ class CortexApp(tk.Tk):
         advice = {"P1": "Act now.", "P2": "Investigate today.", "P3": "Review when convenient.", "P4": "Log and monitor."}
         txt = (f"{a['priority']}  {a['kind']}  -  {a['entity']}   (risk score {a['score']})\n"
                f"{a['detail']}\nSuggested response: {a.get('advice') or advice[a['priority']]}")
+        if a.get("learned"):
+            txt += f"\nLearned: {a['learned']}"
         if a.get("assessment"):
             txt += "\n\nAI assessment:\n" + a["assessment"]
         self.alert_text.delete("1.0", "end")
@@ -1060,6 +1085,165 @@ class CortexApp(tk.Tk):
         self.alert_tree.delete(*self.alert_tree.get_children())
         for p, l in self.prio_chips.items():
             l.configure(text=f"{p}: 0")
+
+    # ======================================================= LEARN FROM YOU
+    def build_learn(self):
+        p = self.pages["Learn from You"]
+        ttk.Label(p, text="Step 9 - Let Cortex learn from how you use it", style="H1.TLabel").pack(anchor="w")
+        ttk.Label(p, text="Everything here is processed on this PC. Your Claude history and alert details are never "
+                          "published; the iPhone only receives counts.", style="Muted.TLabel").pack(anchor="w", pady=(2, 8))
+        top = ttk.Frame(p, style="Page.TFrame"); top.pack(fill="both", expand=True)
+
+        cl = ttk.LabelFrame(top, text="Your Claude history", padding=10)
+        cl.pack(side="left", fill="both", expand=True)
+        ttk.Label(cl, text="claude.ai > Settings > Privacy > Export data. When the email arrives, download the "
+                           "zip and import it here. Cortex proposes skills from code Claude wrote for you; you "
+                           "approve which ones it learns.", wraplength=520, style="Muted.TLabel").pack(anchor="w")
+        r = ttk.Frame(cl, style="Page.TFrame"); r.pack(fill="x", pady=6)
+        b1 = ttk.Button(r, text="Import Claude export...", style="Accent.TButton", command=self._import_claude)
+        b1.pack(side="left")
+        self.claude_summary = ttk.Label(r, text="", style="Muted.TLabel"); self.claude_summary.pack(side="left", padx=10)
+        tf, self.prop_tree = make_tree(cl, ["ID", "Status", "Area", "Skill", "From conversation"], [95, 75, 70, 150, 260], height=8)
+        tf.pack(fill="both", expand=True)
+        for st, col in (("approved", GREEN), ("learned", TEAL), ("failed", RED), ("dismissed", GREY)):
+            self.prop_tree.tag_configure(st, foreground=col)
+        self.prop_tree.bind("<<TreeviewSelect>>", self._show_proposal)
+        r2 = ttk.Frame(cl, style="Page.TFrame"); r2.pack(fill="x", pady=(6, 0))
+        ttk.Button(r2, text="Approve", command=lambda: self._proposal_status("approve")).pack(side="left")
+        ttk.Button(r2, text="Approve all new", command=lambda: self._proposal_status("approve-all")).pack(side="left", padx=6)
+        ttk.Button(r2, text="Dismiss", command=lambda: self._proposal_status("dismiss")).pack(side="left")
+        b2 = ttk.Button(r2, text="Learn selected now", command=self._learn_proposal)
+        b2.pack(side="left", padx=6)
+        self.prop_detail = tk.Text(cl, height=4, wrap="word", font=ui_font(9), relief="solid", borderwidth=1, bg="#FBFCFD")
+        self.prop_detail.pack(fill="x", pady=(6, 0))
+
+        right = ttk.Frame(top, style="Page.TFrame"); right.pack(side="left", fill="both", padx=(12, 0))
+        fbf = ttk.LabelFrame(right, text="Your alert feedback", padding=10); fbf.pack(fill="x")
+        self.fb_summary = ttk.Label(fbf, text="", wraplength=420); self.fb_summary.pack(anchor="w")
+        rr = ttk.Frame(fbf, style="Page.TFrame"); rr.pack(fill="x", pady=6)
+        ttk.Button(rr, text="Import iPhone feedback...", command=self._import_feedback).pack(side="left")
+        ttk.Button(rr, text="Reset", command=self._reset_feedback).pack(side="left", padx=6)
+        self.fb_learned = tk.Text(fbf, height=5, wrap="word", font=ui_font(9), relief="flat", bg=BG)
+        self.fb_learned.pack(fill="x")
+
+        ff = ttk.LabelFrame(right, text="Your focus (learned)", padding=10); ff.pack(fill="x", pady=(10, 0))
+        self.focus_canvas = tk.Canvas(ff, width=420, height=110, bg=BG, highlightthickness=0)
+        self.focus_canvas.pack(anchor="w")
+        self.focus_next = ttk.Label(ff, text="", style="Muted.TLabel"); self.focus_next.pack(anchor="w")
+
+        ap = ttk.LabelFrame(right, text="Nightly autopilot", padding=10); ap.pack(fill="x", pady=(10, 0))
+        self.ap_state = ttk.Label(ap, text="", wraplength=420); self.ap_state.pack(anchor="w")
+        ra = ttk.Frame(ap, style="Page.TFrame"); ra.pack(fill="x", pady=6)
+        b3 = ttk.Button(ra, text="Run autopilot now", style="Accent.TButton",
+                        command=lambda: self.run("autopilot", ["autopilot"], self.learn_con, label="Autopilot running...",
+                                                 done=lambda rc: self.refresh_all()))
+        b3.pack(side="left")
+        ttk.Button(ra, text="Turn nightly on", command=lambda: self._autopilot_schedule(True)).pack(side="left", padx=6)
+        ttk.Button(ra, text="Turn off", command=lambda: self._autopilot_schedule(False)).pack(side="left")
+        self._reg([b1, b2, b3])
+        self.learn_con = Console(p, height=6)
+        self.learn_con.pack(fill="x", pady=(8, 0))
+
+    def refresh_learn(self):
+        from . import autopilot, claude_history as ch, feedback as fb
+        props = ch.load_proposals(self.home)
+        fill_tree(self.prop_tree, [(x["id"], x["status"], x["domain"], x["name"], x["title"]) for x in props
+                                   if x["status"] != "dismissed"], tags_fn=lambda r: [r[1]])
+        prof = ch.load_profile(self.home)
+        self.claude_summary.configure(text=(f"{prof['conversations']} conversations read" if prof else "Not imported yet"))
+        recs = fb.load(self.home)
+        cnt = {v: sum(1 for r in recs if r["verdict"] == v) for v in fb.VERDICTS}
+        self.fb_summary.configure(text=f"{len(recs)} piece(s): {cnt['useful']} useful, {cnt['false_alarm']} false alarms, "
+                                       f"{cnt['acted']} acted on. Mark alerts on the Threat Monitor tab or the iPhone.")
+        lines = fb.describe(fb.summarise(recs))
+        self.fb_learned.configure(state="normal"); self.fb_learned.delete("1.0", "end")
+        self.fb_learned.insert("1.0", "\n".join(lines) or "No adjustments learned yet.")
+        self.fb_learned.configure(state="disabled")
+        f = autopilot.focus(self.home)
+        c = self.focus_canvas; c.delete("all")
+        labels = {"coding": "Coding", "cyber": "Cyber", "bigdata": "Big data", "threat": "Threat"}
+        for i, d in enumerate(("coding", "cyber", "bigdata", "threat")):
+            w = f["weights"].get(d, 0)
+            y = 8 + i * 25
+            c.create_text(0, y + 7, text=labels[d], anchor="w", font=ui_font(9))
+            c.create_rectangle(70, y, 370, y + 14, fill="#DCE6E8", outline="")
+            c.create_rectangle(70, y, 70 + 300 * w, y + 14, fill=TEAL, outline="")
+            c.create_text(378, y + 7, text=f"{w:.0%}", anchor="w", font=ui_font(9))
+        self.focus_next.configure(text="Next autopilot training: " + ", ".join(labels[d] for d in f["next_training"]))
+        st = autopilot._state(self.home)
+        last = st.get("last_run")
+        sched = self._autopilot_installed()
+        self.ap_state.configure(text=("Nightly: ON" if sched else "Nightly: off" if sched is False else "Nightly: Windows only")
+                                + (f" | last run {datetime.fromtimestamp(last).strftime('%d %b %H:%M')}" if last else " | never run"))
+
+    def _import_claude(self):
+        f = filedialog.askopenfilename(title="Choose your Claude data export (.zip)", initialdir=str(Path.home() / "Downloads"),
+                                       filetypes=[("Claude export", "*.zip *.json"), ("All files", "*.*")])
+        if f:
+            self.run("claude", ["import-claude", f], self.learn_con, label="Reading your Claude history...",
+                     done=lambda rc: self.refresh_learn())
+
+    def _selected_proposals(self):
+        return [self.prop_tree.item(i)["values"][0] for i in self.prop_tree.selection()]
+
+    def _proposal_status(self, action):
+        from . import claude_history as ch
+        ids = [str(x) for x in self._selected_proposals()]
+        if action == "approve-all":
+            ch.set_status(self.home, "all-new", "approved")
+        elif ids:
+            ch.set_status(self.home, ids, "approved" if action == "approve" else "dismissed")
+        self.refresh_learn()
+
+    def _show_proposal(self, _=None):
+        from . import claude_history as ch
+        ids = [str(x) for x in self._selected_proposals()]
+        p = next((x for x in ch.load_proposals(self.home) if ids and x["id"] == ids[0]), None)
+        self.prop_detail.delete("1.0", "end")
+        if p:
+            self.prop_detail.insert("1.0", p["spec"] + "\n\nOriginal code:\n" + p["reference_code"][:1500])
+
+    def _learn_proposal(self):
+        ids = [str(x) for x in self._selected_proposals()]
+        if not ids:
+            messagebox.showinfo("Learn", "Select a proposal first.")
+            return
+        self.run("proposal", ["learn-proposal", ids[0], "--attempts", str(self.attempts.get())], self.learn_con,
+                 label="Learning from your Claude history...", done=lambda rc: self.refresh_all())
+
+    def _import_feedback(self):
+        start = next((d for d in (Path.home() / "iCloudDrive", Path.home() / "OneDrive", Path.home() / "Downloads")
+                      if d.exists()), Path.home())
+        f = filedialog.askopenfilename(title="Choose the feedback file sent from your iPhone", initialdir=str(start),
+                                       filetypes=[("Cortex feedback", "cortex-feedback-*.json *.json")])
+        if f:
+            self.run("fbimport", ["feedback", "--import", f], self.learn_con, label="Importing feedback...",
+                     done=lambda rc: self.refresh_learn())
+
+    def _reset_feedback(self):
+        if messagebox.askyesno("Reset feedback", "Forget everything Cortex learned from your alert feedback?\n"
+                                                 "(A backup copy is kept.)"):
+            self.run("fbreset", ["feedback", "--reset"], self.learn_con, done=lambda rc: self.refresh_learn())
+
+    def _autopilot_installed(self):
+        if os.name != "nt":
+            return None
+        import subprocess
+        r = subprocess.run(["schtasks", "/query", "/tn", "CAS Cortex Autopilot"], capture_output=True,
+                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        return r.returncode == 0
+
+    def _autopilot_schedule(self, on: bool):
+        if os.name != "nt":
+            messagebox.showinfo("Autopilot", "The nightly schedule uses Windows Task Scheduler.")
+            return
+        import subprocess
+        args = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+                str(be.APP_DIR / "install_autopilot.ps1")] + ([] if on else ["-Remove"])
+        r = subprocess.run(args, capture_output=True, text=True, errors="replace",
+                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        self.learn_con.write((r.stdout or r.stderr or "").strip() or ("Done." if r.returncode == 0 else "Failed."))
+        self.refresh_learn()
 
     # ============================================================== SAFETY
     def build_safety(self):

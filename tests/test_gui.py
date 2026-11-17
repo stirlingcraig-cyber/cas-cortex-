@@ -56,14 +56,14 @@ def test_job_reports_failure_code(tmp_path):
 
 def test_snapshot_and_journey(tmp_path, trained_home):
     fresh = be.journey(be.snapshot(tmp_path / "empty"), setup_ok=False)
-    assert len(fresh) == 8 and not any(s["done"] for s in fresh)
+    assert len(fresh) == 9 and not any(s["done"] for s in fresh)
     s = be.snapshot(trained_home)
     assert s["skills"] == 12 and s["generation"] == 1 and s["latest_score"] == 1.0
     steps = be.journey(s, setup_ok=True)
     done = {x["title"]: x["done"] for x in steps}
     assert done["Take a baseline score"] and done["Train it"] and done["Measure progress"]
     assert not done["Teach it something new"] and not done["Monitor threats live"]
-    assert {x["tab"] for x in steps} <= {"Setup", "Train", "Progress", "Skills & Memory", "Teach", "Threat Monitor"}
+    assert {x["tab"] for x in steps} <= {"Setup", "Train", "Progress", "Skills & Memory", "Teach", "Threat Monitor", "Learn from You"}
 
 
 def test_progress_and_memory_rows(trained_home):

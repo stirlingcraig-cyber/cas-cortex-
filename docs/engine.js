@@ -266,6 +266,36 @@
     return null;
   }
 
+  /* ---- learning from your feedback (port of cortex/feedback.py) ---- */
+  const VERDICTS = ["useful", "false_alarm", "acted"];
+  const SAFETY_KINDS = new Set(["airbag", "brakes", "overheating", "malicious_server", "multi_signal_device",
+    "worm_scanning", "bruteforce_then_success", "data_exfiltration"]);
+  function summariseFeedback(records) {
+    const out = {};
+    for (const r of records || []) {
+      if (!VERDICTS.includes(r.verdict) || !r.kind) continue;
+      for (const key of [`${r.kind}|${r.entity ?? ""}`, r.kind]) {
+        out[key] = out[key] || { useful: 0, false_alarm: 0, acted: 0 };
+        out[key][r.verdict]++;
+      }
+    }
+    return out;
+  }
+  function adjustPriority(priority, kind, entity, summary) {
+    if (!summary || !Object.keys(summary).length) return [priority, ""];
+    const z = { useful: 0, false_alarm: 0, acted: 0 };
+    const ke = summary[`${kind}|${entity}`] || z, k = summary[kind] || z;
+    const level = parseInt(priority[1], 10);
+    if (ke.false_alarm >= 3 && ke.false_alarm > ke.useful + ke.acted) {
+      const floor = SAFETY_KINDS.has(kind) ? 2 : 4;
+      const nw = level >= floor ? level : Math.min(level + 1, floor);
+      return nw !== level ? [`P${nw}`, `lowered from P${level}: you marked ${ke.false_alarm} similar alerts as false alarms`] : [priority, ""];
+    }
+    if (k.acted >= 2 && k.acted >= k.false_alarm && level > 1)
+      return [`P${level - 1}`, `raised from P${level}: you acted on ${k.acted} alerts like this`];
+    return [priority, ""];
+  }
+
   function beaconAnalysis(timestamps) {
     const ts = [...timestamps].sort((a, b) => a - b);
     const iv = ts.slice(1).map((t, i) => t - ts[i]);
@@ -333,6 +363,7 @@
       this.failCount = opts.failCount || 5;
       this.failWindow = opts.failWindow || 60;
       this.criticality = opts.criticality || {};
+      this.feedback = opts.feedback || {};
       this.fails = new Map(); this.recentBurst = new Map(); this.conns = new Map();
       this.beaconAlerted = new Set(); this.lastLogin = new Map();
       this.alerts = []; this.events = 0; this.seq = 0;
@@ -427,8 +458,10 @@
       const [L, I, harm] = profile || RISK_PROFILE[kind];
       const crit = Math.max(1, Math.min(3, parseInt(this.criticality[entity] || 2, 10)));
       const pr = prioritise(L, I, crit, harm);
+      const [prio, learned] = adjustPriority(pr.priority, kind, entity, this.feedback);
       const a = { id: "A" + this.seq, ts, kind, title: title || TITLES[kind], entity, detail,
-                  score: pr.score, priority: pr.priority, advice: advice || ADVICE[pr.priority] };
+                  score: pr.score, priority: prio, advice: advice || ADVICE[prio] };
+      if (learned) a.learned = learned;
       this.alerts.push(a);
       return a;
     }
@@ -474,6 +507,6 @@
     return out;
   }
 
-  return { Monitor, vehicleDetect, vehicleFindings, findCodes, dtcText, beaconAnalysis, travelCheck, cmdIndicators, prioritise, parseLine, parseCriticality,
+  return { Monitor, summariseFeedback, adjustPriority, vehicleDetect, vehicleFindings, findCodes, dtcText, beaconAnalysis, travelCheck, cmdIndicators, prioritise, parseLine, parseCriticality,
            haversineKm, ADVICE, TITLES };
 });

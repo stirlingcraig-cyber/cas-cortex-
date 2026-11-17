@@ -13,7 +13,7 @@ function show(id) {
   window.scrollTo(0, 0);
   try { localStorage.setItem("cortex-tab", id); } catch (_) {}
 }
-document.querySelectorAll("nav button").forEach(b => b.addEventListener("click", () => show(b.dataset.s)));
+document.querySelectorAll("nav button").forEach(b => b.addEventListener("click", () => { show(b.dataset.s); bump("tab_" + b.dataset.s); }));
 
 /* ---------- data from the PC ---------- */
 async function loadStatus(userAsked) {
@@ -50,7 +50,16 @@ function render() {
   $("home-banner").innerHTML = last
     ? `<b>Latest score ${pct(last.overall)}</b>Train ${pct(last.train)} · Holdout ${pct(last.holdout)} · generation ${last.gen}${ages > 3 ? "<br>Published " + Math.round(ages) + " days ago - publish again from your PC for fresh results." : ""}`
     : "<b>Published</b>No evaluations yet - run one on your PC's Progress tab.";
-  renderProgress(); renderSkills(); renderTools();
+  renderProgress(); renderSkills(); renderTools(); renderFocus();
+}
+function renderFocus() {
+  const f = STATUS && STATUS.focus, el = $("focus");
+  if (!el) return;
+  if (!f || !Object.keys(f.weights || {}).length) { el.innerHTML = '<span class="muted">Cortex will learn your focus as you use it.</span>'; return; }
+  const top = Object.entries(f.weights).sort((a, b) => b[1] - a[1]);
+  el.innerHTML = top.map(([d, w]) => `<div class="item"><b>${esc(AREA[d] || d)}</b>
+    <div style="background:var(--teal-l);border-radius:6px;height:8px;margin-top:6px"><div style="background:var(--teal);height:8px;border-radius:6px;width:${Math.round(w * 100)}%"></div></div></div>`).join("")
+    + (f.next_training ? `<p class="muted">Next autopilot training: ${esc(f.next_training.map(d => AREA[d] || d).join(" + "))}</p>` : "");
 }
 
 /* ---------- progress ---------- */
@@ -118,22 +127,73 @@ function openFile(inp) {
   rd.onload = () => { $("log").value = rd.result; analyse(); };
   rd.readAsText(f);
 }
+/* ---------- learning from your feedback & usage (stays on this phone until you export it) ---------- */
+function loadJSON(k, d) { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch (_) { return d; } }
+function saveJSON(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (_) {} }
+function bump(what) { const u = loadJSON("cortex-usage", {}); u[what] = (u[what] || 0) + 1; saveJSON("cortex-usage", u); }
+function localFeedback() { return loadJSON("cortex-feedback", []); }
+function feedbackSummary() {
+  // PC-learned kind counts (published) + this phone's own feedback not yet counted on the PC
+  const pub = (STATUS && STATUS.feedback) || { kinds: {}, ids: [] };
+  const seen = new Set(pub.ids || []);
+  const mine = CortexEngine.summariseFeedback(localFeedback().filter(r => !seen.has(r.id)));
+  for (const [k, c] of Object.entries(pub.kinds || {})) {
+    mine[k] = mine[k] || { useful: 0, false_alarm: 0, acted: 0 };
+    for (const v of ["useful", "false_alarm", "acted"]) mine[k][v] += c[v] || 0;
+  }
+  return mine;
+}
+let LAST_ALERTS = [];
+function giveFeedback(i, verdict) {
+  const a = LAST_ALERTS[i]; if (!a) return;
+  const rec = { id: (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random()).replace(/-/g, ""),
+                ts: Date.now() / 1000, kind: a.kind, entity: a.entity, verdict };
+  const all = localFeedback(); all.push(rec); saveJSON("cortex-feedback", all.slice(-2000));
+  const el = document.getElementById("fb-" + i);
+  if (el) el.innerHTML = `<span class="muted">Thanks - Cortex will learn from this (${verdict.replace("_", " ")}).</span>`;
+  renderFeedbackCount();
+}
+function renderFeedbackCount() {
+  const n = localFeedback().length, el = $("fb-count");
+  if (el) el.textContent = n ? `${n} piece(s) of feedback on this iPhone.` : "No feedback yet - mark alerts below as useful, false alarm or acted on.";
+}
+function exportFeedback() {
+  const data = { type: "cas-cortex-feedback", version: 1, exported_at: Date.now() / 1000,
+                 feedback: localFeedback(), usage: loadJSON("cortex-usage", {}) };
+  const blob = new Blob([JSON.stringify(data, null, 1)], { type: "application/json" });
+  const name = "cortex-feedback-" + new Date().toISOString().slice(0, 10) + ".json";
+  const file = new File([blob], name, { type: "application/json" });
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    navigator.share({ files: [file], title: "CAS Cortex feedback" }).catch(() => {});
+  } else {
+    const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name; a.click();
+  }
+}
+
 function analyse() {
-  const m = new CortexEngine.Monitor({
+  bump("monitor");
+  const m = new CortexEngine.Monitor({ feedback: feedbackSummary(),
     failCount: parseInt($("fc").value, 10) || 5, failWindow: parseInt($("fw").value, 10) || 60,
     criticality: CortexEngine.parseCriticality($("crit").value),
   });
   const alerts = m.feedText($("log").value).slice()
     .sort((a, b) => a.priority.localeCompare(b.priority) || b.ts - a.ts);   // most urgent first, then newest
+  if (m.source) bump(m.source);
+  LAST_ALERTS = alerts;
   const counts = { P1: 0, P2: 0, P3: 0, P4: 0 };
   alerts.forEach(a => counts[a.priority]++);
   $("chips").innerHTML = ["P1", "P2", "P3", "P4"].map(p => `<div class="chip ${p}">${p}: ${counts[p]}</div>`).join("");
-  $("alerts").innerHTML = alerts.map(a => {
+  $("alerts").innerHTML = alerts.map((a, i) => {
     const t = new Date(a.ts * 1000).toLocaleTimeString("en-GB");
     return `<details class="alert"><summary class="top"><span class="badge ${a.priority}">${a.priority}</span>
       <span class="t">${esc(a.title)}</span></summary>
       <div class="d">${esc(a.entity)} · ${t} · risk score ${a.score}</div>
-      <div class="d">${esc(a.detail)}</div><div class="d"><b>Suggested response:</b> ${esc(a.advice)}</div></details>`;
+      <div class="d">${esc(a.detail)}</div><div class="d"><b>Suggested response:</b> ${esc(a.advice)}</div>
+      ${a.learned ? `<div class="d"><span class="pill">learned</span> ${esc(a.learned)}</div>` : ""}
+      <div class="row" id="fb-${i}" style="margin-top:8px">
+        <button class="btn small ghost" onclick="giveFeedback(${i},'useful')">Useful</button>
+        <button class="btn small ghost" onclick="giveFeedback(${i},'false_alarm')">False alarm</button>
+        <button class="btn small ghost" onclick="giveFeedback(${i},'acted')">I acted on it</button></div></details>`;
   }).join("") || '<div class="card muted">No alerts - nothing found that needs attention.</div>';
   const what = { obd_test_report: "CAS OBD Scanner test report", obd_health: "CAS OBD Scanner health history",
                  obd_data_log: "CAS OBD Scanner data log", obd_codes: "car fault codes" }[m.source];
@@ -223,3 +283,4 @@ _out`);
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
 try { const t = localStorage.getItem("cortex-tab"); if (t && $(t)) show(t); } catch (_) {}
 loadStatus(false);
+renderFeedbackCount();

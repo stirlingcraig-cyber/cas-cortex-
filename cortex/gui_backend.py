@@ -135,6 +135,7 @@ def snapshot(home: Path) -> dict:
             "custom_tasks": len(list(cfg.tasks_dir.glob("*.json"))),
             "self_tested": sum(1 for k in mem.all_skills() if k.trust == "self-tested"),
             "alerts_file": (cfg.home / "alerts.jsonl").exists(),
+            "learning_from_you": (cfg.home / "feedback.jsonl").exists() or (cfg.home / "claude_profile.json").exists(),
         })
         return s
     finally:
@@ -153,6 +154,8 @@ def journey(s: dict, setup_ok: bool) -> list[dict]:
         ("Teach it something new", "Describe a new ability or add your own tasks.", "Teach",
          s["custom_tasks"] > 0 or s["self_tested"] > 0),
         ("Monitor threats live", "Watch logs for attacks and prioritised risks.", "Threat Monitor", s["alerts_file"]),
+        ("Let it learn from you", "Alert feedback, your Claude history and nightly autopilot.", "Learn from You",
+         s.get("learning_from_you", False)),
     ]
     return [{"title": t, "detail": d, "tab": tab, "done": bool(done)} for t, d, tab, done in steps]
 
@@ -308,3 +311,29 @@ def open_path(path: Path):
         subprocess.Popen(["open", str(path)])
     else:
         subprocess.Popen(["xdg-open", str(path)])
+
+
+# ------------------------------------------------------------- usage counters
+def bump_usage(home: Path, key: str, n: int = 1) -> None:
+    """Count what you use Cortex for (no content - just e.g. 'monitor:obd' or 'train:cyber')."""
+    p = Path(home) / "usage.json"
+    try:
+        d = json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
+    except (json.JSONDecodeError, OSError):
+        d = {}
+    d[key] = d.get(key, 0) + n
+    p.write_text(json.dumps(d, indent=1), encoding="utf-8")
+
+
+def monitor_source_key(path: str) -> str:
+    from .vehicle import detect
+    p = str(path).lower()
+    if "homenetguard" in p.replace(" ", "") or "homenet_guard" in p:
+        return "monitor:homenet"
+    try:
+        head = Path(path).read_text(encoding="utf-8", errors="replace")[:4096] + "\n"
+    except OSError:
+        return "monitor:other"
+    if detect(head) or p.endswith(".json") and "health" in p or "fault" in p:
+        return "monitor:obd"
+    return "monitor:logs"

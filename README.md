@@ -93,6 +93,24 @@ Training stays on the PC because it needs the local AI model. To send results to
 
 Only learning data is published. **Alerts and log contents are never published**, because the repo is public.
 
+## Learning from you
+
+Cortex keeps learning from how you use it (Desktop app → **Learn from You** tab):
+
+* **Alert feedback.** Mark any alert *Useful*, *False alarm* or *I acted on it* (PC or iPhone). Repeated false alarms
+  for the same device or vehicle lower that alert type one level; alert types you act on are raised one level.
+  Safety alerts never drop below P2. Each changed alert says why, and **Reset** undoes everything.
+  iPhone → Monitor → **Send feedback to PC…** (iCloud Drive), and the autopilot imports it.
+* **Your Claude history.** claude.ai → Settings → Privacy → Export data, then **Import Claude export…**
+  (`.\cortex import-claude export.zip`). It's read locally. Cortex keeps topic counts and *skill proposals* from code
+  Claude wrote for you; you approve which ones it learns. Its self-written tests are checked against your original
+  function (`reference-checked` skills).
+* **Focus + nightly autopilot.** Cortex learns which areas matter to you. **Turn nightly on**
+  (`install_autopilot.ps1`) and each night it imports iPhone feedback, learns approved proposals, trains your top
+  areas (all areas weekly), evaluates weekly and publishes to the iPhone.
+
+None of your Claude history, device names, IP addresses or VINs is ever published; the iPhone only receives counts.
+
 ## CAS HomeNet Guard integration
 
 Cortex reads HomeNet Guard's alert file (`C:\ProgramData\CAS Solutions\HomeNetGuard\alerts.jsonl`) directly:
