@@ -122,7 +122,7 @@ def publish(home: Path, push: bool = True, out=print, cwd: Path = APP_DIR) -> bo
     owner_repo = url.rstrip("/").removesuffix(".git").split("github.com")[-1].strip(":/")
     if "/" in owner_repo:
         owner, repo = owner_repo.split("/", 1)
-        out(f"Published. On your iPhone open https://{owner.lower()}.github.io/{repo}/ and pull down to refresh "
+        out(f"Published. On your iPhone open https://{owner.lower()}.github.io/{repo}/ and tap Refresh from PC "
             "(GitHub can take about a minute to update).")
     else:
         out("Published.")
