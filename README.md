@@ -109,6 +109,23 @@ What Cortex adds:
 * HomeNet Guard's own recommendation is shown as the suggested response.
 * Live watching never holds the file open, so HomeNet Guard can keep updating it; rewritten alerts aren't counted twice.
 
+## CAS OBD Scanner integration
+
+Cortex reads the scanner's exports, on the PC or the iPhone, and ranks every problem P1–P4 by the harm it could
+cause on the road: airbags, brakes and overheating come above an MOT-only emissions fault.
+
+| Scanner export | Where in CAS OBD Scanner |
+|---|---|
+| Test report CSV | Tests → *Save as spreadsheet* |
+| Car health history JSON | Health → *Export history* (voltage and fuel-trim trends across checks) |
+| Data log CSV | Data log → *Download CSV* (overheating, voltage drops, sensor glitches) |
+| Fault codes | Type or paste codes such as `P0300 C0035 B0012` |
+
+* **Desktop:** Threat Monitor tab → **Open OBD export...** (or a Sample button). Command line: `.\cortex watch <file>`.
+* **iPhone:** Monitor → **Open file…**, or type fault codes into the box → **Analyse**.
+* **Teach Cortex car skills:** Teach tab → **Add automotive task pack** (`.\cortex add-pack automotive`). This adds 4
+  tasks (decode fault-code bytes, convert live-data bytes, triage codes by harm, summarise a data log); then train.
+
 ## Install (Windows) — free, local, no API key
 
 **Easiest:** unzip, open the `cas-cortex` folder, double-click **`setup.bat`**.

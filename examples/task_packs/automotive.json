@@ -1,0 +1,92 @@
+[
+  {
+    "id": "coding.obd_decode_dtc",
+    "domain": "coding",
+    "split": "train",
+    "title": "Decode an OBD fault code",
+    "entry_point": "decode_dtc",
+    "prompt": "Write `decode_dtc(raw: str) -> str` that turns the two bytes an OBD-II car returns for a fault code (written as 4 hex characters, any case) into the standard 5-character code. Take the first hex digit as a 4-bit value v: the letter is 'PCBU'[v >> 2] and the next digit is v & 3. The remaining 3 hex characters follow unchanged but upper-cased. Examples: '0301' -> 'P0301', 'C073' -> 'U0073'. Raise ValueError unless the input is exactly 4 hex characters.",
+    "visible_tests": [
+      "assert decode_dtc('0301') == 'P0301'",
+      "assert decode_dtc('c073') == 'U0073'"
+    ],
+    "hidden_tests": [
+      "assert decode_dtc('4123') == 'C0123'",
+      "assert decode_dtc('8001') == 'B0001'",
+      "assert decode_dtc('D100') == 'U1100'",
+      "assert decode_dtc('1234') == 'P1234'",
+      "assert decode_dtc('3abc') == 'P3ABC'",
+      "assert decode_dtc('9FFF') == 'B1FFF'",
+      "assert decode_dtc('0000') == 'P0000'",
+      "try:\n    decode_dtc('030')\n    raise AssertionError('expected ValueError')\nexcept ValueError:\n    pass",
+      "try:\n    decode_dtc('XYZ1')\n    raise AssertionError('expected ValueError')\nexcept ValueError:\n    pass",
+      "try:\n    decode_dtc('03011')\n    raise AssertionError('expected ValueError')\nexcept ValueError:\n    pass"
+    ]
+  },
+  {
+    "id": "coding.obd_pid_value",
+    "domain": "coding",
+    "split": "train",
+    "title": "Convert OBD live-data bytes",
+    "entry_point": "pid_value",
+    "prompt": "Write `pid_value(pid: int, data: list[int]) -> float` converting OBD-II mode 01 response bytes (A = data[0], B = data[1]) into a reading, rounded to 2 decimal places:\n0x04 engine load = A*100/255; 0x05 coolant = A-40; 0x06-0x09 fuel trims = (A-128)*100/128; 0x0C RPM = (256*A+B)/4; 0x0D speed = A; 0x0F intake temp = A-40; 0x11 throttle = A*100/255; 0x42 module voltage = (256*A+B)/1000.\nRaise ValueError for any other pid, too few bytes for the formula, or a byte outside 0-255.",
+    "visible_tests": [
+      "assert pid_value(0x0C, [0x1A, 0xF8]) == 1726.0",
+      "assert pid_value(0x05, [0x7B]) == 83"
+    ],
+    "hidden_tests": [
+      "assert pid_value(0x04, [255]) == 100.0",
+      "assert pid_value(0x04, [128]) == 50.2",
+      "assert pid_value(0x06, [128]) == 0.0",
+      "assert pid_value(0x07, [0]) == -100.0",
+      "assert pid_value(0x07, [143]) == 11.72",
+      "assert pid_value(0x42, [0x36, 0xB0]) == 14.0",
+      "assert pid_value(0x0D, [88]) == 88",
+      "assert pid_value(0x0F, [0]) == -40",
+      "assert pid_value(0x11, [51]) == 20.0",
+      "try:\n    pid_value(0x99, [1, 2])\n    raise AssertionError('expected ValueError')\nexcept ValueError:\n    pass",
+      "try:\n    pid_value(0x0C, [1])\n    raise AssertionError('expected ValueError')\nexcept ValueError:\n    pass",
+      "try:\n    pid_value(0x05, [256])\n    raise AssertionError('expected ValueError')\nexcept ValueError:\n    pass"
+    ]
+  },
+  {
+    "id": "threat.dtc_triage",
+    "domain": "threat",
+    "split": "train",
+    "title": "Triage car fault codes by harm",
+    "entry_point": "triage_dtcs",
+    "prompt": "Write `triage_dtcs(codes: list[str]) -> list[dict]` that ranks car fault codes by the harm they could cause on the road. Each code must match ^[PCBU][0-3][0-9A-F]{3}$ or raise ValueError. Compare the 4 characters after the letter as strings. Priorities, first match wins:\nP1 (safety): B0001-B0099 (airbags), any C code (brakes/ABS/steering), U0121-U0129 and U0151 (lost ABS/airbag module), P0217-P0218 (overheating).\nP2: P0300-P0312 (misfire), P0335-P0349, P0087-P0088, P0234, P0560-P0563, P0700-P0799, and any other U code.\nP4: P0400-P0499 (emissions) and any other B code.\nP3: everything else.\nReturn [{'code': c, 'priority': p}] without duplicate codes, sorted by priority (P1 first) then code.",
+    "visible_tests": [
+      "assert triage_dtcs(['P0420', 'B0012']) == [{'code': 'B0012', 'priority': 'P1'}, {'code': 'P0420', 'priority': 'P4'}]",
+      "assert triage_dtcs([]) == []"
+    ],
+    "hidden_tests": [
+      "assert triage_dtcs(['P0300', 'C1234', 'U0100', 'P0171']) == [{'code': 'C1234', 'priority': 'P1'}, {'code': 'P0300', 'priority': 'P2'}, {'code': 'U0100', 'priority': 'P2'}, {'code': 'P0171', 'priority': 'P3'}]",
+      "assert [x['priority'] for x in triage_dtcs(['U0151', 'U0121', 'U0130'])] == ['P1', 'P1', 'P2']",
+      "assert triage_dtcs(['P0217', 'P0217', 'B1000']) == [{'code': 'P0217', 'priority': 'P1'}, {'code': 'B1000', 'priority': 'P4'}]",
+      "assert [x['code'] for x in triage_dtcs(['P0442', 'P0401', 'P0700', 'P0562'])] == ['P0562', 'P0700', 'P0401', 'P0442']",
+      "assert triage_dtcs(['P0312', 'P0313'])[1] == {'code': 'P0313', 'priority': 'P3'}",
+      "try:\n    triage_dtcs(['p0300'])\n    raise AssertionError('expected ValueError')\nexcept ValueError:\n    pass",
+      "try:\n    triage_dtcs(['P4300'])\n    raise AssertionError('expected ValueError')\nexcept ValueError:\n    pass",
+      "try:\n    triage_dtcs(['X0300'])\n    raise AssertionError('expected ValueError')\nexcept ValueError:\n    pass"
+    ]
+  },
+  {
+    "id": "bigdata.sensor_summary",
+    "domain": "bigdata",
+    "split": "holdout",
+    "title": "Summarise a car data log",
+    "entry_point": "summarise_sensors",
+    "prompt": "Write `summarise_sensors(rows) -> dict` for a car data log. `rows` is any iterable (possibly a large generator) of (timestamp: str, sensor: str, value) tuples. Skip rows whose value is None or can't be converted with float(). Return {sensor: {'count': n, 'min': x, 'max': y, 'mean': m, 'first': t1, 'last': t2}} where min/max/mean are floats (mean rounded to 3 decimal places) and first/last are the timestamps of the first and last counted readings for that sensor. Use memory proportional to the number of sensors.",
+    "visible_tests": [
+      "assert summarise_sensors([('t1', 'RPM', 800), ('t2', 'RPM', '900')]) == {'RPM': {'count': 2, 'min': 800.0, 'max': 900.0, 'mean': 850.0, 'first': 't1', 'last': 't2'}}",
+      "assert summarise_sensors([]) == {}"
+    ],
+    "hidden_tests": [
+      "r = summarise_sensors([('a', 'V', 14.1), ('b', 'V', None), ('c', 'V', 'x'), ('d', 'T', 90), ('e', 'V', 13.9)])\nassert r == {'V': {'count': 2, 'min': 13.9, 'max': 14.1, 'mean': 14.0, 'first': 'a', 'last': 'e'}, 'T': {'count': 1, 'min': 90.0, 'max': 90.0, 'mean': 90.0, 'first': 'd', 'last': 'd'}}",
+      "gen = (('t%d' % i, 'S%d' % (i % 3), i) for i in range(300000))\nr = summarise_sensors(gen)\nassert r['S0']['count'] == 100000 and r['S2']['last'] == 't299999' and r['S1']['mean'] == 149999.5",
+      "assert summarise_sensors([('t', 'X', '1/3')]) == {}",
+      "assert summarise_sensors([('t', 'X', 1/3)])['X']['mean'] == 0.333"
+    ]
+  }
+]

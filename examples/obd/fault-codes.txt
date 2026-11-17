@@ -1,0 +1,6 @@
+Trouble codes read 17 Nov 2026:
+B0012 Driver airbag deployment loop resistance high
+C0035 Left front wheel speed sensor
+U0121 Lost communication with ABS module
+P0300 Random/multiple cylinder misfire
+P0442 EVAP small leak

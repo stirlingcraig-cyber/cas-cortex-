@@ -782,7 +782,11 @@ class CortexApp(tk.Tk):
                                       "fall within any 60-second window, otherwise False.")
         lb = ttk.Button(a, text="Learn it", style="Accent.TButton", command=self._learn)
         lb.grid(row=3, column=1, sticky="w", padx=6, pady=10)
-        self._reg([lb])
+        pk = ttk.Button(a, text="Add automotive task pack (CAS OBD)", command=lambda: self.run(
+            "pack", ["add-pack", "automotive"], self.teach_con, label="Adding task pack...",
+            done=lambda rc: (self.refresh_teach(), self.refresh_train(), self.refresh_home())))
+        pk.grid(row=3, column=2, columnspan=2, sticky="w", padx=6, pady=10)
+        self._reg([lb, pk])
         a.columnconfigure(3, weight=1); a.rowconfigure(4, weight=1)
         self.teach_con = Console(a, height=10)
         self.teach_con.grid(row=4, column=0, columnspan=4, sticky="nsew")
@@ -885,6 +889,13 @@ class CortexApp(tk.Tk):
         ttk.Button(hng, text="Sample: HomeNet Guard", command=lambda: self.mon_file.set(
             str(be.APP_DIR / "examples" / "homenet_guard_alerts.jsonl"))).pack(side="left", padx=8)
         ttk.Button(hng, text="Copy log for iPhone...", command=self._copy_for_iphone).pack(side="left")
+        obd = ttk.Frame(lf, style="Page.TFrame")
+        obd.grid(row=5, column=0, columnspan=7, sticky="w", pady=(8, 0))
+        ttk.Label(obd, text="CAS OBD Scanner:", font=ui_font(10, "bold")).pack(side="left", padx=(0, 8))
+        ttk.Button(obd, text="Open OBD export...", style="Accent.TButton", command=self._open_obd).pack(side="left")
+        for label, fname in (("Sample: test report", "cas-obd-test-report.csv"), ("Sample: car health", "health-WVWZZZAWZHY123456.json"),
+                             ("Sample: data log", "obd-log-2026-11-17-07-40-00.csv"), ("Sample: fault codes", "fault-codes.txt")):
+            ttk.Button(obd, text=label, command=lambda f=fname: self._obd_sample(f)).pack(side="left", padx=(8, 0))
         self.mon_opts = {k: tk.BooleanVar(value=v) for k, v in (("follow", False), ("from_start", True),
                                                                 ("use_learned", False), ("triage", False))}
         labels = {"follow": "Keep watching (live)", "from_start": "Include existing lines",
@@ -933,6 +944,20 @@ class CortexApp(tk.Tk):
         self.mon_con.pack(fill="x", pady=(6, 0))
         pw.add(tf, weight=3); pw.add(bottom, weight=1)
         self._alerts = []
+
+    def _obd_sample(self, fname):
+        self.mon_file.set(str(be.APP_DIR / "examples" / "obd" / fname))
+        self.mon_opts["follow"].set(False)
+        self._start_monitor()
+
+    def _open_obd(self):
+        f = filedialog.askopenfilename(title="Open a CAS OBD Scanner export (test report, health history, data log or fault codes)",
+                                       initialdir=str(Path.home() / "Downloads"),
+                                       filetypes=[("OBD exports", "*.csv *.json *.txt"), ("All files", "*.*")])
+        if f:
+            self.mon_file.set(f)
+            self.mon_opts["follow"].set(False)
+            self._start_monitor()
 
     def _use_homenet(self):
         from .realtime import HNG_DEFAULT_PATH

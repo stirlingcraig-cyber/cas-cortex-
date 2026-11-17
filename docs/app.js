@@ -134,8 +134,11 @@ function analyse() {
       <span class="t">${esc(a.title)}</span></summary>
       <div class="d">${esc(a.entity)} · ${t} · risk score ${a.score}</div>
       <div class="d">${esc(a.detail)}</div><div class="d"><b>Suggested response:</b> ${esc(a.advice)}</div></details>`;
-  }).join("") || '<div class="card muted">No alerts - nothing suspicious found.</div>';
-  $("mon-summary").textContent = `${m.events} events analysed, ${alerts.length} alert(s). Analysed on this iPhone - nothing was uploaded.`;
+  }).join("") || '<div class="card muted">No alerts - nothing found that needs attention.</div>';
+  const what = { obd_test_report: "CAS OBD Scanner test report", obd_health: "CAS OBD Scanner health history",
+                 obd_data_log: "CAS OBD Scanner data log", obd_codes: "car fault codes" }[m.source];
+  $("mon-summary").textContent = (what ? `Read as ${what}. ` : `${m.events} events analysed. `) +
+    `${alerts.length} alert(s). Analysed on this iPhone - nothing was uploaded.`;
 }
 
 /* ---------- tools: run learned skills with Pyodide ---------- */

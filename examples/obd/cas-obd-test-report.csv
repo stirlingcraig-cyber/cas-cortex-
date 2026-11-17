@@ -1,0 +1,9 @@
+group,command,test,result,value,explanation,expected
+"Vehicle identity","0902","VIN","Info","WVWZZZAWZHY123456","Vehicle identification number.","17 characters"
+"Adapter","ATI","Adapter chip version","Check","ELM327 v2.1","v2.1 is reported by many budget clones. Generic OBD2 works, but some advanced functions may be missing.","v1.4 or v1.5 is typical."
+"Electrical","0142","Engine computer supply voltage","Check","12.9 V","Low for a running engine - the alternator may not be charging fully.","Running: 13.2-14.8 V."
+"Engine","0105","Coolant temperature","Pass","91 °C","Normal operating temperature.","Warm engine: 80-105 °C."
+"Fuel and air","0107","Long term fuel trim B1","Check","+11.7 %","The engine is adding fuel to correct a lean mixture.","Within ±10%."
+"Fault codes","03","Confirmed fault codes","Fail","P0301, P0420","Confirmed faults: P0301 (Cylinder 1 misfire); P0420 (Catalyst efficiency below threshold (bank 1)). Open Trouble codes and press Analyse.","None."
+"Fault codes","07","Pending fault codes","Fail","P0171","Pending faults: P0171 (System too lean (bank 1)).","None."
+"Fault codes","0A","Permanent fault codes","Fail","P0420","Permanent faults: P0420.","None."

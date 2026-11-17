@@ -5,6 +5,7 @@ import argparse
 import json
 import sys
 import textwrap
+import time
 from pathlib import Path
 
 from . import __version__
@@ -112,6 +113,30 @@ def cmd_publish(rt, a):
     from .publish import publish
     if not publish(rt.cfg.home, push=not a.no_push):
         sys.exit(1)
+
+
+def cmd_add_pack(rt, a):
+    """Install a task pack (e.g. automotive) into the curriculum."""
+    import shutil
+    from .gui_backend import APP_DIR
+    src = Path(a.pack)
+    if not src.exists():
+        src = APP_DIR / "examples" / "task_packs" / f"{a.pack}.json"
+    if not src.exists():
+        packs = sorted(p.stem for p in (APP_DIR / "examples" / "task_packs").glob("*.json"))
+        sys.exit(f"No task pack '{a.pack}'. Available: {', '.join(packs)}")
+    dest = rt.cfg.tasks_dir / f"pack_{src.stem}.json"
+    shutil.copyfile(src, dest)
+    try:
+        tasks = all_tasks(rt.cfg.tasks_dir)
+    except Exception as e:
+        dest.unlink()
+        sys.exit(f"Couldn't add the pack: {e}")
+    new = [t for t in json.loads(src.read_text(encoding="utf-8"))]
+    print(f"Added {len(new)} task(s) from '{src.stem}': " + ", ".join(t["id"] for t in new))
+    print(f"Curriculum now has {len(tasks)} tasks. Train with:  cortex train" +
+          (f" --domain {new[0]['domain']}" if len({t['domain'] for t in new}) == 1 else ""))
+    rt.audit.write("task_pack_added", pack=src.stem, tasks=[t["id"] for t in new])
 
 
 def cmd_gui(rt, a):
@@ -239,14 +264,17 @@ def cmd_watch(rt, a):
             for line in sys.stdin:
                 rt.kill.check()
                 mon.feed(line)
-        elif a.follow:
+        elif a.follow and not _is_vehicle_export(a.file):
             print(f"Watching {a.file} (Ctrl+C or `cortex stop` to end)")
             follow(Path(a.file), mon, a.from_start, rt.kill.check)
         else:
-            with open(a.file, encoding="utf-8", errors="replace") as f:
-                for line in f:
-                    rt.kill.check()
-                    mon.feed(line)
+            from . import vehicle
+            text = Path(a.file).read_text(encoding="utf-8", errors="replace")
+            what = vehicle.analyse_text(mon, text, time.time())
+            if what:
+                print("CAS OBD Scanner: " + {"obd_test_report": "test report", "obd_health": "car health history",
+                                             "obd_data_log": "data log", "obd_codes": "fault codes"}[what]
+                      + (" - no problems found." if not mon.alerts else " analysed."))
     except KeyboardInterrupt:
         pass
     finally:
@@ -256,6 +284,15 @@ def cmd_watch(rt, a):
         print(f"\n{mon.events} events, {len(mon.alerts)} alerts "
               + json.dumps(dict(sorted(counts.items()))))
         rt.audit.write("watch_end", events=mon.events, alerts=len(mon.alerts))
+
+
+def _is_vehicle_export(path) -> bool:
+    from . import vehicle
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            return vehicle.detect(f.read(4096) + "\n") is not None or path.lower().endswith(".json")
+    except OSError:
+        return False
 
 
 def cmd_lock(rt, a):
@@ -306,6 +343,8 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("gui", help="open the desktop app")
     s = sub.add_parser("publish", help="publish progress to GitHub for the iPhone app")
     s.add_argument("--no-push", action="store_true", help="only write docs/data/status.json")
+    s = sub.add_parser("add-pack", help="add a ready-made task pack, e.g. automotive")
+    s.add_argument("pack", help="pack name (automotive) or path to a pack .json")
     sub.add_parser("check-sandbox", help="test that agent code can run on this PC (no AI needed)")
     s = sub.add_parser("doctor", help="check setup, choose a local model for your PC, download it")
     s.add_argument("--pull", action="store_true", help="download the model if missing")
@@ -347,7 +386,7 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
-COMMANDS = {"status": cmd_status, "doctor": cmd_doctor, "gui": cmd_gui, "check-sandbox": cmd_check_sandbox, "publish": cmd_publish, "tasks": cmd_tasks, "train": cmd_train, "eval": cmd_eval,
+COMMANDS = {"status": cmd_status, "doctor": cmd_doctor, "gui": cmd_gui, "check-sandbox": cmd_check_sandbox, "publish": cmd_publish, "add-pack": cmd_add_pack, "tasks": cmd_tasks, "train": cmd_train, "eval": cmd_eval,
             "solve": cmd_solve, "learn": cmd_learn, "skills": cmd_skills, "memory": cmd_memory,
             "report": cmd_report, "watch": cmd_watch, "lock": cmd_lock, "verify": cmd_verify,
             "stop": cmd_stop, "resume": cmd_resume}

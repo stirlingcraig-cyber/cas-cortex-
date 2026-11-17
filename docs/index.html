@@ -80,6 +80,7 @@ nav button.on{color:var(--teal)}
     <h3>What you can do here</h3>
     <div class="card">
       <div class="item"><b>Threat Monitor</b><div class="muted">Open your CAS HomeNet Guard alerts (or any supported log) and get prioritised P1–P4 alerts, including devices showing several compromise signs. Runs entirely on your iPhone - nothing is uploaded.</div></div>
+      <div class="item"><b>Car checks</b><div class="muted">Open a CAS OBD Scanner export or type your fault codes in the Monitor to see which faults matter for safety (P1) and which are only MOT risks.</div></div>
       <div class="item"><b>Progress</b><div class="muted">The learning curve from your PC's evaluations.</div></div>
       <div class="item"><b>Skills</b><div class="muted">Every skill Cortex has learned, its code, and its lessons.</div></div>
       <div class="item"><b>Tools</b><div class="muted">Run learned skills on your phone (e.g. CVSS scoring, IOC extraction).</div></div>
@@ -96,10 +97,13 @@ nav button.on{color:var(--teal)}
         <button class="btn small ghost" onclick="useSample('auth')">Sample: SSH log</button>
         <button class="btn small ghost" onclick="useSample('events')">Sample: events</button>
         <button class="btn small ghost" onclick="useSample('homenet')">Sample: HomeNet Guard</button>
+        <button class="btn small ghost" onclick="useSample('obd_report')">Sample: car test report</button>
+        <button class="btn small ghost" onclick="useSample('obd_health')">Sample: car health</button>
+        <button class="btn small ghost" onclick="useSample('obd_codes')">Sample: fault codes</button>
         <button class="btn small ghost" onclick="document.getElementById('file').click()">Open file…</button>
-        <input type="file" id="file" accept=".log,.txt,.jsonl,.json,text/plain" style="display:none" onchange="openFile(this)">
+        <input type="file" id="file" accept=".log,.txt,.jsonl,.json,.csv,text/plain,text/csv" style="display:none" onchange="openFile(this)">
       </div>
-      <label for="log">Log lines (HomeNet Guard alerts.jsonl, sshd auth log or JSON lines)</label>
+      <label for="log">Paste or open: HomeNet Guard alerts, CAS OBD Scanner exports, car fault codes (e.g. P0300), SSH logs or JSON events</label>
       <textarea id="log" placeholder="Paste log lines here…"></textarea>
       <label for="crit">Critical assets (1 low – 3 critical)</label>
       <input id="crit" placeholder="e.g. 10.0.0.5=3 FILESERVER01=3" value="203.0.113.7=3">

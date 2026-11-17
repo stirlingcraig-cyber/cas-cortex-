@@ -72,6 +72,14 @@
     impossible_travel: "Impossible travel",
     suspicious_process: "Suspicious command line",
     multi_signal_device: "Device showing multiple compromise signs",
+    airbag: "Airbag (SRS) fault", brakes: "ABS / brakes / stability fault", overheating: "Engine overheating",
+    misfire: "Engine misfire", stall_risk: "Risk of stalling", fuel_pressure: "Fuel pressure fault", boost: "Turbo boost fault",
+    charging: "Charging / voltage problem", transmission: "Gearbox fault", speed_sensor: "Speed sensor fault",
+    dpf: "Particulate filter overloaded", fuel_trim: "Fuel mixture problem", cooling: "Cooling system fault",
+    emissions: "Emissions fault (MOT risk)", network: "Module communication fault", engine: "Engine fault",
+    body: "Body electronics fault", battery: "Battery low", oil_overheat: "Oil overheating",
+    charging_trend: "Charging voltage falling", fuel_trim_trend: "Fuel mixture drifting", sensor_jump: "Sensor glitch",
+    vehicle_test_fail: "Failed vehicle check", vehicle_test_check: "Vehicle check to review",
   };
 
   // Format numbers like Python's repr(float) so phone and PC alerts read identically.
@@ -79,6 +87,184 @@
   function round(x, dp) { const f = Math.pow(10, dp); return Math.round(x * f) / f; }
   function mean(a) { return a.reduce((s, v) => s + v, 0) / a.length; }
   function pstdev(a) { const m = mean(a); return Math.sqrt(a.reduce((s, v) => s + (v - m) * (v - m), 0) / a.length); }
+
+
+  /* ======================= CAS OBD Scanner (vehicle) =======================
+     Port of cortex/vehicle.py - keep the two identical (tests/test_vehicle.py). */
+  const DTC_RE_G = /\b([PCBU][0-3][0-9A-F]{3})\b/g, DTC_START = /^([PCBU][0-3][0-9A-F]{3})\b/;
+  const DTC_TXT = {"P0087": "Fuel rail/system pressure too low", "P0088": "Fuel rail/system pressure too high", "P0100": "MAF sensor circuit", "P0101": "MAF sensor range/performance", "P0102": "MAF sensor circuit low", "P0103": "MAF sensor circuit high", "P0106": "MAP sensor range/performance", "P0110": "Intake air temp sensor circuit", "P0115": "Coolant temp sensor circuit", "P0116": "Coolant temp sensor range/performance", "P0120": "Throttle position sensor circuit", "P0128": "Coolant below thermostat regulating temperature", "P0130": "O2 sensor circuit (B1S1)", "P0133": "O2 sensor slow response (B1S1)", "P0135": "O2 sensor heater circuit (B1S1)", "P0141": "O2 sensor heater circuit (B1S2)", "P0171": "System too lean (bank 1)", "P0172": "System too rich (bank 1)", "P0174": "System too lean (bank 2)", "P0175": "System too rich (bank 2)", "P0234": "Turbo/supercharger overboost", "P0299": "Turbo/supercharger underboost", "P0300": "Random/multiple cylinder misfire", "P0301": "Cylinder 1 misfire", "P0302": "Cylinder 2 misfire", "P0303": "Cylinder 3 misfire", "P0304": "Cylinder 4 misfire", "P0305": "Cylinder 5 misfire", "P0306": "Cylinder 6 misfire", "P0325": "Knock sensor 1 circuit (bank 1)", "P0335": "Crankshaft position sensor A circuit", "P0340": "Camshaft position sensor A circuit (bank 1)", "P0380": "Glow plug/heater circuit A", "P0400": "EGR flow", "P0401": "EGR insufficient flow", "P0402": "EGR excessive flow", "P0420": "Catalyst efficiency below threshold (bank 1)", "P0430": "Catalyst efficiency below threshold (bank 2)", "P0440": "EVAP system", "P0442": "EVAP system small leak", "P0455": "EVAP system large leak", "P0456": "EVAP system very small leak", "P0500": "Vehicle speed sensor", "P0505": "Idle air control system", "P0507": "Idle speed higher than expected", "P0562": "System voltage low", "P0563": "System voltage high", "P0600": "Serial communication link", "P0700": "Transmission control system (see TCM codes)", "P2002": "Diesel particulate filter efficiency below threshold", "P2463": "Diesel particulate filter soot accumulation", "U0100": "Lost communication with engine control module", "U0121": "Lost communication with ABS control module", "U0151": "Lost communication with airbag (restraints) control module"};
+  const DTC_SYS = { P: "Powertrain", C: "Chassis", B: "Body", U: "Network" };
+  const KIND_LABEL = {"airbag": "Airbag (SRS) system fault", "brakes": "ABS, brakes, stability or steering fault", "misfire": "Engine misfire", "overheating": "Over-temperature fault", "transmission": "Gearbox fault", "charging": "System voltage fault", "emissions": "Emissions system fault", "network": "Module communication fault"};
+  const DTC_RULES = [["B", "0001", "0099", "airbag", 4, 5, "severe", "The airbag (SRS) system has a fault and may not deploy in a crash. Get it checked before carrying passengers."], ["U", "0151", "0151", "airbag", 3, 5, "severe", "The car has lost contact with the airbag module - the airbags may not deploy. Get it checked promptly."], ["U", "0121", "0129", "brakes", 3, 5, "severe", "The car has lost contact with the ABS/stability module - ABS and stability control may be off. Drive gently and get it checked."], ["C", "0000", "3FFF", "brakes", 4, 5, "severe", "Chassis fault (ABS, brakes, stability control or steering). These systems may be disabled - drive gently and get it checked promptly."], ["P", "0217", "0218", "overheating", 5, 5, "severe", "Engine or gearbox over-temperature. Stop safely and let it cool - driving on can wreck the engine."], ["P", "0300", "0312", "misfire", 5, 4, "moderate", "Engine misfire. Avoid hard acceleration. If the check-engine light flashes, stop - unburnt fuel can overheat the catalytic converter."], ["P", "0335", "0349", "stall_risk", 4, 4, "moderate", "Crankshaft/camshaft sensor fault - the engine may cut out or fail to restart. Fix it before a long journey."], ["P", "0087", "0088", "fuel_pressure", 4, 4, "moderate", "Fuel pressure fault - possible loss of power or stalling."], ["P", "0234", "0234", "boost", 4, 4, "moderate", "Turbo overboost - can damage the engine. Avoid full throttle until checked."], ["P", "0560", "0563", "charging", 4, 4, "moderate", "System voltage fault - the battery or alternator may be failing and could leave you stranded."], ["P", "0700", "0799", "transmission", 4, 4, "moderate", "Gearbox fault - gear changes may be affected or the car may go into limp mode."], ["P", "0500", "0503", "speed_sensor", 3, 4, "moderate", "Vehicle speed sensor fault - the speedometer, ABS or gearbox may behave oddly."], ["P", "2463", "2463", "dpf", 4, 3, "moderate", "Diesel particulate filter is overloaded with soot - it needs a regeneration drive soon or the car may go into limp mode."], ["P", "0171", "0175", "fuel_trim", 4, 3, "minor", "Fuel mixture lean or rich - check for air leaks, the MAF sensor or fuel delivery."], ["P", "0299", "0299", "boost", 4, 3, "minor", "Turbo underboost - reduced power. Check the boost hoses and wastegate."], ["P", "0115", "0128", "cooling", 3, 3, "minor", "Cooling sensor or thermostat fault - keep an eye on the temperature gauge."], ["P", "2002", "2002", "emissions", 4, 3, "minor", "Diesel particulate filter efficiency low - an MOT failure risk."], ["P", "0400", "0499", "emissions", 4, 2, "minor", "Emissions system fault (catalyst, EGR or EVAP) - likely an MOT failure rather than a safety issue."], ["U", "0000", "3FFF", "network", 3, 4, "moderate", "Module communication fault - some systems may not work correctly."], ["P", "0000", "3FFF", "engine", 3, 3, "minor", "Engine or powertrain fault - get the code diagnosed."], ["B", "0000", "3FFF", "body", 3, 2, "none", "Body electronics fault (lights, locks or comfort systems) - usually not urgent."]];
+  const TEST_IMPACT = {"Engine": 4, "Electrical": 4, "Fuel and air": 3, "Emissions": 2, "Communication": 2, "Adapter": 1, "Vehicle identity": 1};
+  const JUMP = {"Coolant temperature": 8.0, "Control module voltage": 1.0, "Long term fuel trim B1": 8.0, "Long term fuel trim B2": 8.0, "Engine oil temperature": 8.0};
+  const NUM_RE = /^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/;
+
+  function r1(x) { return (Math.floor(x * 10 + 0.5) / 10).toFixed(1); }
+  function num(x) {
+    if (x === null || x === undefined || typeof x === "boolean") return null;
+    if (typeof x === "number") return isFinite(x) ? x : null;
+    const t = String(x).trim();
+    return NUM_RE.test(t) ? parseFloat(t) : null;
+  }
+  function classifyDtc(code) {
+    for (const [letter, lo, hi, kind, L, I, harm, advice] of DTC_RULES)
+      if (code[0] === letter && lo <= code.slice(1) && code.slice(1) <= hi) return [kind, L, I, harm, advice];
+    return ["engine", 3, 3, "minor", "Get the code diagnosed."];
+  }
+  function dtcText(code) {
+    if (DTC_TXT[code]) return DTC_TXT[code];
+    const generic = "02".includes(code[1]);
+    const base = KIND_LABEL[classifyDtc(code)[0]] || (DTC_SYS[code[0]] + " fault");
+    return base + (generic ? " (generic code)" : " (manufacturer-specific code - look up for your make)");
+  }
+  function findCodes(text) {
+    const seen = new Set(), out = [];
+    for (const m of String(text || "").matchAll(DTC_RE_G)) if (!seen.has(m[1])) { seen.add(m[1]); out.push(m[1]); }
+    return out;
+  }
+  function finding(kind, entity, ts, detail, L, I, harm, advice) {
+    return { kind, entity, ts, detail, profile: [Math.max(1, Math.min(5, L)), I, harm], advice };
+  }
+  function dtcFindings(codes, entity, ts, status) {
+    return codes.map(c => {
+      let [kind, L, I, harm, advice] = classifyDtc(c);
+      let label = `${c} ${dtcText(c)}`;
+      if (status === "pending") { L -= 1; label += " (pending - seen recently, not yet confirmed)"; }
+      else if (status === "permanent") label += " (permanent - clears itself once the repair is confirmed)";
+      return finding(kind, entity, ts, label, L, I, harm, advice);
+    });
+  }
+  function stripBom(t) { return String(t || "").replace(/^﻿/, ""); }
+  function vehicleDetect(text) {
+    const head = stripBom(text).trimStart();
+    const first = head.split("\n", 1)[0].trim().toLowerCase();
+    if (first.startsWith("group,command,test,result,value,explanation,expected")) return "test_report";
+    if (first.startsWith("timestamp,pid,sensor,value,unit")) return "data_log";
+    if (head.startsWith("{")) {
+      try { const d = JSON.parse(head); if (d && typeof d === "object" && !Array.isArray(d) && Array.isArray(d.checks)) return "health"; }
+      catch (_) {}
+    }
+    return null;
+  }
+  function parseCsv(text) {                       // RFC 4180, like Python's csv module
+    const t = stripBom(text).trim(), rows = []; let row = [], f = "", q = false;
+    for (let i = 0; i < t.length; i++) {
+      const c = t[i];
+      if (q) { if (c === '"') { if (t[i + 1] === '"') { f += '"'; i++; } else q = false; } else f += c; }
+      else if (c === '"') q = true;
+      else if (c === ",") { row.push(f); f = ""; }
+      else if (c === "\n" || c === "\r") { if (c === "\r" && t[i + 1] === "\n") i++; row.push(f); rows.push(row); row = []; f = ""; }
+      else f += c;
+    }
+    if (f !== "" || row.length) { row.push(f); rows.push(row); }
+    return rows;
+  }
+  function testReportFindings(text, now) {
+    const rows = parseCsv(text).slice(1);
+    let entity = "vehicle";
+    for (const r of rows) if (r.length >= 5 && r[2] === "VIN" && r[4].trim().length === 17) entity = r[4].trim();
+    const out = [];
+    for (const r of rows) {
+      if (r.length < 6) continue;
+      const [group, , test, result, value, note] = r;
+      if (group === "Fault codes") {
+        const status = test.includes("Pending") ? "pending" : test.includes("Permanent") ? "permanent" : "";
+        out.push(...dtcFindings(findCodes(value), entity, now, status));
+        continue;
+      }
+      if (result !== "Fail" && result !== "Check") continue;
+      const I = TEST_IMPACT[group] ?? 2;
+      const detail = value ? `${test}: ${value} - ${note}` : `${test} - ${note}`;
+      if (test === "Coolant temperature" && result === "Fail")
+        out.push(finding("overheating", entity, now, detail, 5, 5, "severe", "The engine is overheating. Stop safely and let it cool - driving on can wreck the engine."));
+      else if (result === "Fail")
+        out.push(finding("vehicle_test_fail", entity, now, detail, 4, I, (group === "Engine" || group === "Electrical") ? "moderate" : "minor", "Failed check - see the explanation and get it looked at."));
+      else
+        out.push(finding("vehicle_test_check", entity, now, detail, 3, I, "none", "Worth checking - not urgent on its own."));
+    }
+    return out;
+  }
+  function slope(ys) {
+    const n = ys.length, mx = (n - 1) / 2; let my = 0; for (const y of ys) my += y; my /= n;
+    let a = 0, b = 0;
+    ys.forEach((y, i) => { a += (i - mx) * (y - my); });
+    for (let i = 0; i < n; i++) b += (i - mx) * (i - mx);
+    return b ? a / b : 0;
+  }
+  function healthFindings(text, now) {
+    const d = JSON.parse(stripBom(text));
+    const entity = (typeof d.vin === "string" && d.vin.trim()) ? d.vin.trim() : "vehicle";
+    const h = (d.checks || []).filter(c => c && typeof c === "object" && !Array.isArray(c));
+    if (!h.length) return [];
+    const L = h[h.length - 1], ts = hngTime(L.t) || now;
+    const rpm = num(L.rpm), v = num(L.vRun), cool = num(L.coolant), lt = num(L.ltft), run = num(L.runtime);
+    const out = [], running = rpm !== null && rpm > 500;
+    if (running && v !== null && v < 13.2) out.push(finding("charging", entity, ts, `Charging voltage low (${r1(v)} V with the engine running)`, 4, 4, "moderate", "The alternator may be failing - the battery will run down and the car could stop."));
+    if (running && v !== null && v > 15) out.push(finding("charging", entity, ts, `Overcharging (${r1(v)} V)`, 4, 4, "moderate", "Suspect the voltage regulator - overcharging damages the battery and electronics."));
+    if (rpm !== null && rpm < 300 && v !== null && v < 12.2) out.push(finding("battery", entity, ts, `Battery low with the engine off (${r1(v)} V)`, 3, 3, "minor", "Charge or test the battery - it may not start the car on a cold morning."));
+    if (running && cool !== null && cool >= 112) out.push(finding("overheating", entity, ts, `Coolant at ${r1(cool)} °C`, 5, 5, "severe", "The engine is overheating. Stop safely and let it cool - driving on can wreck the engine."));
+    if (lt !== null && Math.abs(lt) > 10) out.push(finding("fuel_trim", entity, ts, `Long-term fuel trim ${r1(lt)}% (${lt > 0 ? "lean - air leak or fuel delivery" : "rich"})`, 3, 3, "minor", "The engine is compensating for a mixture problem - check before it sets a P0171/P0172."));
+    if (run !== null && run > 900 && cool !== null && cool < 75) out.push(finding("cooling", entity, ts, `Coolant only ${r1(cool)} °C after ${Math.floor(run / 60 + 0.5)} min`, 3, 2, "minor", "The thermostat may be sticking open - poor heating and higher fuel use."));
+    const runs = h.filter(c => (num(c.rpm) || 0) > 500 && num(c.vRun) !== null).slice(-10);
+    if (runs.length >= 3) {
+      const drop = slope(runs.map(c => num(c.vRun))) * (runs.length - 1);
+      if (drop < -0.3) out.push(finding("charging_trend", entity, ts, `Charging voltage drifted down ${r1(-drop)} V over ${runs.length} checks`, 3, 4, "minor", "The alternator or battery may be weakening."));
+    }
+    const lts = h.filter(c => num(c.ltft) !== null).slice(-10);
+    if (lts.length >= 3) {
+      const dr = slope(lts.map(c => num(c.ltft))) * (lts.length - 1);
+      if (Math.abs(dr) > 5) out.push(finding("fuel_trim_trend", entity, ts, `Fuel trim drifting ${dr > 0 ? "lean" : "rich"} (${r1(dr)}% over ${lts.length} checks)`, 3, 3, "minor", "Catch it early - before a P0171/P0172 fault code is set."));
+    }
+    return out;
+  }
+  function dataLogFindings(text, now) {
+    const series = new Map();
+    for (const r of parseCsv(text).slice(1)) {
+      if (r.length < 4) continue;
+      const v = num(r[3]); if (v === null) continue;
+      if (!series.has(r[2])) series.set(r[2], []);
+      series.get(r[2]).push([hngTime(r[0]) || now, v]);
+    }
+    const out = [], ent = "vehicle";
+    const firstOver = (name, lim) => (series.get(name) || []).find(p => p[1] >= lim) || null;
+    let hit = firstOver("Coolant temperature", 112);
+    if (hit) out.push(finding("overheating", ent, hit[0], `Coolant reached ${r1(Math.max(...series.get("Coolant temperature").map(p => p[1])))} °C`, 5, 5, "severe", "The engine overheated. Stop safely and let it cool - check coolant level and fan."));
+    hit = firstOver("Engine oil temperature", 130);
+    if (hit) out.push(finding("oil_overheat", ent, hit[0], `Oil temperature reached ${r1(hit[1])} °C`, 4, 4, "moderate", "Oil this hot loses protection - ease off and check oil level and cooling."));
+    const volts = series.get("Control module voltage") || [];
+    if (volts.length) {
+      let lo = volts[0], hi = volts[0];
+      for (const p of volts) { if (p[1] < lo[1]) lo = p; if (p[1] > hi[1]) hi = p; }
+      if (lo[1] < 11.0) out.push(finding("charging", ent, lo[0], `Supply voltage dropped to ${r1(lo[1])} V`, 4, 4, "moderate", "A weak battery, poor earth or failing alternator - the car could cut out."));
+      if (hi[1] > 15.2) out.push(finding("charging", ent, hi[0], `Supply voltage rose to ${r1(hi[1])} V`, 4, 4, "moderate", "Suspect the voltage regulator - overcharging damages the battery and electronics."));
+    }
+    for (const name of ["Long term fuel trim B1", "Long term fuel trim B2"]) {
+      const s = series.get(name) || [];
+      if (s.length >= 5) {
+        let m = 0; for (const p of s) m += p[1]; m /= s.length;
+        if (Math.abs(m) > 10) out.push(finding("fuel_trim", ent, s[s.length - 1][0], `${name} averaged ${r1(m)}%`, 3, 3, "minor", "The engine is compensating for a mixture problem - check for air leaks or the MAF sensor."));
+      }
+    }
+    for (const [name, jump] of Object.entries(JUMP)) {
+      const s = series.get(name) || []; const w = 20; let n = 0, first = null;
+      for (let i = w; i < s.length; i++) {
+        let m = 0; for (let k = i - w; k < i; k++) m += s[k][1]; m /= w;
+        let ss = 0; for (let k = i - w; k < i; k++) ss += (s[k][1] - m) * (s[k][1] - m);
+        const sd = Math.sqrt(ss / w), x = s[i][1];
+        if (Math.abs(x - m) >= jump && (sd === 0 || Math.abs(x - m) / sd > 4)) { n++; first = first || s[i]; }
+      }
+      if (n) out.push(finding("sensor_jump", ent, first[0], `${n} sudden jump(s) in ${name} (first to ${r1(first[1])})`, 2, 2, "none", "Could be a loose connector or failing sensor - watch for it again."));
+    }
+    return out;
+  }
+  function vehicleFindings(text, now) {
+    const k = vehicleDetect(text);
+    if (k === "test_report") return testReportFindings(text, now);
+    if (k === "health") return healthFindings(text, now);
+    if (k === "data_log") return dataLogFindings(text, now);
+    return null;
+  }
 
   function beaconAnalysis(timestamps) {
     const ts = [...timestamps].sort((a, b) => a - b);
@@ -246,8 +432,34 @@
       this.alerts.push(a);
       return a;
     }
-    feedText(text) {
+    applyFindings(findings) {
+      const best = new Map();
+      for (const f of findings) {
+        const m = DTC_START.exec(f.detail);
+        const key = JSON.stringify([f.kind, f.entity, m ? f.detail.slice(0, 5) : f.detail]);
+        const cur = best.get(key);
+        if (!cur) best.set(key, f);
+        else if (f.profile[0] * f.profile[1] > cur.profile[0] * cur.profile[1]) best.set(key, f);
+      }
+      return [...best.values()].map(f => this.alert(f.kind, f.entity, f.ts, f.detail, f.profile, f.advice,
+        f.kind.startsWith("vehicle_test") ? f.detail.split(/: | - /)[0] : null));
+    }
+    feedText(text, now) {
+      now = now ?? Date.now() / 1000;
+      this.source = null;
+      let found = null;
+      try { found = vehicleFindings(text, now); } catch (_) { found = null; }
+      if (found !== null) {                       // a CAS OBD Scanner export
+        this.source = "obd_" + vehicleDetect(text);
+        this.events += 1;
+        this.applyFindings(found);
+        return this.alerts;
+      }
       for (const line of text.split(/\r?\n/)) this.feed(line);
+      if (this.events === 0) {
+        const codes = findCodes(text);
+        if (codes.length) { this.source = "obd_codes"; this.events += 1; this.applyFindings(dtcFindings(codes, "vehicle", now, "")); }
+      }
       return this.alerts;
     }
   }
@@ -262,6 +474,6 @@
     return out;
   }
 
-  return { Monitor, beaconAnalysis, travelCheck, cmdIndicators, prioritise, parseLine, parseCriticality,
+  return { Monitor, vehicleDetect, vehicleFindings, findCodes, dtcText, beaconAnalysis, travelCheck, cmdIndicators, prioritise, parseLine, parseCriticality,
            haversineKm, ADVICE, TITLES };
 });
