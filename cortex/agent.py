@@ -6,6 +6,7 @@ evaluator's hidden tests.
 from __future__ import annotations
 
 import ast
+import re
 import time
 from dataclasses import dataclass, field
 
@@ -91,6 +92,34 @@ def clean_solution(code: str) -> str:
     return ast.unparse(ast.Module(body=keep, type_ignores=[])) + "\n"
 
 
+# Names small models often use without importing them -> the import that fixes it.
+AUTO_IMPORTS = {m: f"import {m}" for m in ("math", "re", "statistics", "heapq", "bisect", "itertools", "functools",
+                                             "collections", "json", "random", "string", "datetime", "ipaddress",
+                                             "hashlib", "base64", "operator", "time", "csv", "io", "copy", "decimal")}
+AUTO_IMPORTS.update({
+    "defaultdict": "from collections import defaultdict", "Counter": "from collections import Counter",
+    "deque": "from collections import deque", "OrderedDict": "from collections import OrderedDict",
+    "namedtuple": "from collections import namedtuple", "dataclass": "from dataclasses import dataclass",
+    "field": "from dataclasses import field", "reduce": "from functools import reduce",
+    "lru_cache": "from functools import lru_cache", "heappush": "from heapq import heappush",
+    "heappop": "from heapq import heappop", "sqrt": "from math import sqrt", "radians": "from math import radians",
+    "sin": "from math import sin", "cos": "from math import cos", "asin": "from math import asin",
+    "atan2": "from math import atan2", "floor": "from math import floor", "ceil": "from math import ceil",
+    "inf": "from math import inf", "isclose": "from math import isclose", "mean": "from statistics import mean",
+    "pstdev": "from statistics import pstdev", "median": "from statistics import median",
+    **{t: f"from typing import {t}" for t in ("List", "Dict", "Tuple", "Optional", "Any", "Iterable", "Iterator",
+                                              "Set", "Union", "Callable", "Sequence")},
+})
+_MISSING = re.compile(r"NameError: name '(\w+)' is not defined")
+
+
+def missing_imports(result) -> list[str]:
+    """Import lines that would fix NameErrors such as "name 'math' is not defined"."""
+    texts = [result.load_error or ""] + [r.get("error") or "" for r in result.results]
+    names = {m for t in texts for m in _MISSING.findall(t)}
+    return sorted({AUTO_IMPORTS[n] for n in names if n in AUTO_IMPORTS})
+
+
 def short_reason(result) -> str:
     """One-line explanation of a failed attempt, for the live console."""
     if result is None or result.all_passed:
@@ -159,6 +188,25 @@ class CortexAgent:
         parts.append(f"Write the complete module defining `{task.entry_point}`.")
         return "\n\n".join(parts), lessons, {s.name: s.code for s in skills}
 
+    def _auto_import(self, code, result, task, skill_code):
+        """Fix forgotten standard-library imports without spending another model call.
+        Local models often write math.sqrt(...) but forget `import math`, then repeat the
+        same mistake on every retry."""
+        for _ in range(3):
+            if result.all_passed or result.policy or result.timed_out:
+                break
+            fixes = [f for f in missing_imports(result) if f not in code]
+            if not fixes:
+                break
+            fixed = "\n".join(fixes) + "\n" + code
+            again = run_tests(fixed, task.visible_tests, skills=skill_code, timeout=self.timeout,
+                              memory_mb=self.memory_mb)
+            if again.passed < result.passed:
+                break
+            self.log(f"      auto-fixed missing import: {', '.join(fixes)}")
+            code, result = fixed, again
+        return code, result
+
     # ---------------------------------------------------------------- solve
     def solve(self, task: TaskView, mode: str = "train", trust: str = "verified-visible") -> Outcome:
         t0 = time.time()
@@ -175,6 +223,7 @@ class CortexAgent:
             code = clean_solution(extract_code(r.text))
             result = run_tests(code, task.visible_tests, skills=skill_code,
                                timeout=self.timeout, memory_mb=self.memory_mb)
+            code, result = self._auto_import(code, result, task, skill_code)
             history.append(f"attempt {attempts}: {result.passed}/{result.total} visible tests"
                            + (" (policy)" if result.policy else "")
                            + (" (timeout)" if result.timed_out else "")

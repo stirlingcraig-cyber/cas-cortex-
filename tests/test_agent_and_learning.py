@@ -99,3 +99,17 @@ def test_failure_reason_is_shown(mem, audit):
     CortexAgent(FakeLLM([bad, bad, "{}"]), mem, audit, max_attempts=2, log=logs.append).solve(
         T["coding.merge_intervals"].public_view())
     assert any("reason: RuntimeError: boom on import" in l for l in logs)
+
+
+def test_forgotten_import_is_fixed_without_another_model_call(mem, audit):
+    """Seen on a real PC: a local model used math.radians(...) without `import math` and
+    repeated it on every retry. Cortex now adds the import itself."""
+    from conftest import BY_ENTRY
+    from cortex.llm import FakeLLM
+    ref = BY_ENTRY["impossible_travel"].replace("import math\n", "").replace("from collections import defaultdict\n", "")
+    llm = FakeLLM(["```python\n" + ref + "\n```", '{"lesson": "Always import modules you use.", "knowledge": []}'])
+    logs = []
+    o = CortexAgent(llm, mem, audit, log=logs.append).solve(T["threat.impossible_travel"].public_view())
+    assert o.solved and o.attempts == 1 and len(llm.calls) == 2           # 1 attempt + 1 reflection
+    assert "import math" in o.code and "from collections import defaultdict" in o.code
+    assert any("auto-fixed missing import" in l for l in logs)

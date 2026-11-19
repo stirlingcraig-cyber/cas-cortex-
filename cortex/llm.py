@@ -80,7 +80,8 @@ class OpenAICompatLLM(LLM):
                 "messages": [{"role": "system", "content": system}] + messages}
         headers = {"Authorization": f"Bearer {self.api_key}"} if self.api_key else None
         d = _post_json(self.base_url + "/chat/completions", body, headers, "the local model server",
-                       f"Check the server is running at {self.base_url} with a model loaded.")
+                       f"Cortex is set to use LM Studio (provider 'openai'). Either start LM Studio's local server with a "
+                       "model loaded, or if you use Ollama (the default): Setup tab > Provider 'ollama' > Use this model.")
         u = d.get("usage") or {}
         return LLMResponse(d["choices"][0]["message"]["content"] or "",
                            u.get("prompt_tokens", 0), u.get("completion_tokens", 0))

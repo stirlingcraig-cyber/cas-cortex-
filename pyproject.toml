@@ -1,6 +1,6 @@
 [project]
 name = "cas-cortex"
-version = "0.8.0"
+version = "0.8.1"
 description = "CAS Cortex - self-learning engineering agent (memory + skill learning)"
 requires-python = ">=3.10"
 dependencies = []
