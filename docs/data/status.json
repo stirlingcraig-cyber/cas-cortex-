@@ -1,1 +1,903 @@
-{"published_at": null, "note": "Publish from your PC: Progress tab > Publish to iPhone"}
+{
+ "version": "0.9.0",
+ "published_at": 1795553476,
+ "provider": "ollama",
+ "model": "qwen2.5-coder:3b",
+ "stats": {
+  "episodes": 26,
+  "solved_episodes": 18,
+  "skills": 11,
+  "lessons": 20,
+  "knowledge_triples": 71,
+  "eval_runs": 5,
+  "generation": 3,
+  "tokens_used": 137662
+ },
+ "runs": [
+  {
+   "run": "20261116-191820-5802f7",
+   "ts": 1794856775.6588664,
+   "gen": 0,
+   "cells": {
+    "train/coding": 0.8095,
+    "holdout/coding": 0.4,
+    "train/cyber": 0.3889,
+    "holdout/cyber": 0.125,
+    "train/bigdata": 0.75,
+    "holdout/bigdata": 0.25,
+    "train/threat": 0.45,
+    "holdout/threat": 1.0
+   },
+   "train": 0.5996,
+   "holdout": 0.4437,
+   "overall": 0.5606
+  },
+  {
+   "run": "20261119-185615-081889",
+   "ts": 1795114654.3722103,
+   "gen": 1,
+   "cells": {
+    "train/coding": 0.8095
+   },
+   "train": 0.8095,
+   "holdout": null,
+   "overall": 0.8095
+  },
+  {
+   "run": "20261124-193252-4784c3",
+   "ts": 1795548923.4762642,
+   "gen": 3,
+   "cells": {
+    "holdout/coding": 0.4,
+    "holdout/cyber": 0.0,
+    "holdout/bigdata": 0.5,
+    "holdout/threat": 0.3333
+   },
+   "train": null,
+   "holdout": 0.3083,
+   "overall": 0.3083
+  },
+  {
+   "run": "20261124-200700-b42f7a",
+   "ts": 1795550891.7107825,
+   "gen": 3,
+   "cells": {
+    "holdout/coding": 0.4,
+    "holdout/cyber": 0.125,
+    "holdout/bigdata": 0.75,
+    "holdout/threat": 0.3333
+   },
+   "train": null,
+   "holdout": 0.4021,
+   "overall": 0.4021
+  },
+  {
+   "run": "20261124-202235-2f328e",
+   "ts": 1795551844.1844149,
+   "gen": 3,
+   "cells": {
+    "holdout/coding": 0.0,
+    "holdout/cyber": 0.0,
+    "holdout/bigdata": 0.0,
+    "holdout/threat": 0.3333
+   },
+   "train": null,
+   "holdout": 0.0833,
+   "overall": 0.0833
+  }
+ ],
+ "skills": [
+  {
+   "name": "group_aggregate",
+   "domain": "bigdata",
+   "trust": "verified-visible",
+   "version": 1,
+   "successes": 2,
+   "uses": 0,
+   "description": "Streaming group-by aggregation. Write `group_aggregate(rows, key, value) -> dict`. `rows` is an iterable of dicts",
+   "code": "from collections import defaultdict, Counter\n\ndef group_aggregate(rows, key, value):\n    if not rows:\n        return {}\n\n    result = defaultdict(lambda: {'count': 0, 'sum': 0.0, 'min': float('inf'), 'max': float('-inf'), 'mean': 0.0})\n\n    for row in rows:\n        if key in row and row[key] is not None:\n            try:\n                val = float(row[value])\n                result[row[key]]['count'] += 1\n                result[row[key]]['sum'] += val\n                result[row[key]]['min'] = min(result[row[key]]['min'], val)\n                result[row[key]]['max'] = max(result[row[key]]['max'], val)\n                result[row[key]]['mean'] = result[row[key]]['sum'] / result[row[key]]['count']\n            except ValueError:\n                continue\n\n    return dict(result)\n",
+   "tests": [
+    "assert group_aggregate([{'k': 'a', 'v': 2}, {'k': 'a', 'v': 4}], 'k', 'v') == {'a': {'count': 2, 'sum': 6.0, 'min': 2.0, 'max': 4.0, 'mean': 3.0}}",
+    "assert group_aggregate([], 'k', 'v') == {}"
+   ]
+  },
+  {
+   "name": "reservoir_sample",
+   "domain": "bigdata",
+   "trust": "verified-visible",
+   "version": 1,
+   "successes": 1,
+   "uses": 0,
+   "description": "Reservoir sampling. Write `reservoir_sample(stream, k, seed) -> list` using exactly Algorithm R with",
+   "code": "import random\n\ndef reservoir_sample(stream, k, seed):\n    if k <= 0:\n        return []\n    \n    rng = random.Random(seed)\n    reservoir = []\n    \n    for i, item in enumerate(stream):\n        if i < k:\n            reservoir.append(item)\n        else:\n            j = rng.randint(0, i)\n            if j < k:\n                reservoir[j] = item\n    \n    return reservoir\n",
+   "tests": [
+    "assert reservoir_sample(range(3), 5, 1) == [0, 1, 2]",
+    "assert len(reservoir_sample(range(1000), 10, 42)) == 10"
+   ]
+  },
+  {
+   "name": "top_k_frequent",
+   "domain": "bigdata",
+   "trust": "verified-visible",
+   "version": 1,
+   "successes": 2,
+   "uses": 0,
+   "description": "Streaming top-k frequent items. Write `top_k_frequent(stream, k) -> list[tuple]`. `stream` is any iterable (possibly",
+   "code": "from collections import Counter\n\ndef top_k_frequent(stream, k):\n    if k <= 0:\n        return []\n    \n    # Use Counter to count the frequency of each item in the stream\n    frequency = Counter(stream)\n    \n    # Extract the k most common items\n    most_common = frequency.most_common(k)\n    \n    return most_common\n",
+   "tests": [
+    "assert top_k_frequent(iter('abracadabra'), 2) == [('a', 5), ('b', 2)]",
+    "assert top_k_frequent([], 3) == []"
+   ]
+  },
+  {
+   "name": "LRUCache",
+   "domain": "coding",
+   "trust": "verified-visible",
+   "version": 1,
+   "successes": 1,
+   "uses": 0,
+   "description": "LRU cache. Write a class `LRUCache(capacity: int)` with methods `get(key)` and `put(key, value)`.",
+   "code": "from typing import *\nfrom collections import *\n\nclass LRUCache:\n    def __init__(self, capacity: int):\n        self.capacity = capacity\n        self.cache = OrderedDict()\n\n    def get(self, key: int) -> int:\n        if key in self.cache:\n            self.cache.move_to_end(key)\n            return self.cache[key]\n        return -1\n\n    def put(self, key: int, value: int) -> None:\n        if key in self.cache:\n            self.cache.move_to_end(key)\n        self.cache[key] = value\n        if len(self.cache) > self.capacity:\n            self.cache.popitem(last=False)\n",
+   "tests": [
+    "\nc = LRUCache(2); c.put(1, 1); c.put(2, 2)\nassert c.get(1) == 1\n",
+    "\nc = LRUCache(1); c.put('a', 1); c.put('b', 2)\nassert c.get('a') == -1\n"
+   ]
+  },
+  {
+   "name": "merge_intervals",
+   "domain": "coding",
+   "trust": "verified-visible",
+   "version": 1,
+   "successes": 1,
+   "uses": 0,
+   "description": "Merge intervals. Write `merge_intervals(intervals) -> list[list[int]]`. Input is an unsorted list of",
+   "code": "from typing import *\nfrom collections import *\n\ndef merge_intervals(intervals: List[List[int]]) -> List[List[int]]:\n    if not intervals:\n        return []\n\n    intervals.sort(key=lambda x: x[0])\n\n    merged = [intervals[0]]\n\n    for interval in intervals[1:]:\n        if interval[0] <= merged[-1][1]:\n            merged[-1][1] = max(merged[-1][1], interval[1])\n        else:\n            merged.append(interval)\n\n    return merged\n",
+   "tests": [
+    "assert merge_intervals([[1, 3], [2, 6], [8, 10]]) == [[1, 6], [8, 10]]",
+    "assert merge_intervals([]) == []"
+   ]
+  },
+  {
+   "name": "version_compare",
+   "domain": "coding",
+   "trust": "verified-visible",
+   "version": 1,
+   "successes": 1,
+   "uses": 0,
+   "description": "Compare version strings. Write `version_compare(a: str, b: str) -> int` comparing dotted version strings.",
+   "code": "from typing import *\nfrom collections import *\n\ndef version_compare(a: str, b: str) -> int:\n    def parse_version(version: str) -> List[int]:\n        version = version.lstrip('vV').split('.')\n        return [int(component) for component in version if component.isdigit()]\n\n    a_parts = parse_version(a)\n    b_parts = parse_version(b)\n\n    for i in range(max(len(a_parts), len(b_parts))):\n        a_part = a_parts[i] if i < len(a_parts) else 0\n        b_part = b_parts[i] if i < len(b_parts) else 0\n\n        if a_part < b_part:\n            return -1\n        elif a_part > b_part:\n            return 1\n\n    return 0\n",
+   "tests": [
+    "assert version_compare('1.2.10', '1.2.9') == 1",
+    "assert version_compare('1.2', '1.2.0') == 0"
+   ]
+  },
+  {
+   "name": "detect_bruteforce",
+   "domain": "cyber",
+   "trust": "verified-visible",
+   "version": 1,
+   "successes": 1,
+   "uses": 0,
+   "description": "Detect SSH brute force. Write `detect_bruteforce(lines, threshold=5) -> dict[str, int]` for sshd auth logs.",
+   "code": "import re\n\ndef detect_bruteforce(lines, threshold=5) -> dict[str, int]:\n    ip_counts = {}\n    \n    for line in lines:\n        match = re.search(r'Failed password for \\w+ from (\\d+\\.\\d+\\.\\d+\\.\\d+) port \\d+ ssh2', line)\n        if match:\n            ip = match.group(1)\n            if ip in ip_counts:\n                ip_counts[ip] += 1\n            else:\n                ip_counts[ip] = 1\n    \n    return {ip: count for ip, count in ip_counts.items() if count >= threshold}\n",
+   "tests": [
+    "\nL = ['Mar 10 12:00:01 host sshd[1]: Failed password for root from 10.0.0.5 port 22 ssh2'] * 5\nassert detect_bruteforce(L) == {'10.0.0.5': 5}\n",
+    "assert detect_bruteforce([]) == {}"
+   ]
+  },
+  {
+   "name": "extract_iocs",
+   "domain": "cyber",
+   "trust": "verified-visible",
+   "version": 1,
+   "successes": 4,
+   "uses": 1,
+   "description": "Extract indicators of compromise. Write `extract_iocs(text: str) -> dict` returning",
+   "code": "import re\n\ndef extract_iocs(text: str) -> dict:\n    def refang(text: str) -> str:\n        text = text.replace('[.]', '.')\n        text = text.replace('(.)', '.')\n        text = text.replace('{.}', '.')\n        text = text.replace('hxxp', 'http')\n        return text.lower()\n\n    def is_valid_ipv4(ip: str) -> bool:\n        parts = ip.split('.')\n        if len(parts) != 4:\n            return False\n        for part in parts:\n            if not part.isdigit() or not (0 <= int(part) <= 255):\n                return False\n        return True\n\n    def is_valid_domain(domain: str) -> bool:\n        return re.match(r'\\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]{2,24}\\b', domain) is not None\n\n    def is_valid_sha256(sha256: str) -> bool:\n        return re.match(r'\\b[a-f0-9]{64}\\b', sha256) is not None\n\n    text = refang(text)\n\n    ipv4 = sorted(set(re.findall(r'\\b(?:\\d{1,3}\\.){3}\\d{1,3}\\b', text)))\n    domains = sorted(set(re.findall(r'\\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]{2,24}\\b', text)))\n    sha256 = sorted(set(re.findall(r'\\b[a-f0-9]{64}\\b', text)))\n\n    return {\"ipv4\": ipv4, \"domains\": domains, \"sha256\": sha256}\n",
+   "tests": [
+    "assert extract_iocs('ping 8.8.8.8 now')['ipv4'] == ['8.8.8.8']",
+    "assert extract_iocs('visit evil[.]example[.]com')['domains'] == ['evil.example.com']"
+   ]
+  },
+  {
+   "name": "jwt_expired",
+   "domain": "cyber",
+   "trust": "verified-visible",
+   "version": 1,
+   "successes": 1,
+   "uses": 0,
+   "description": "JWT expiry check. Write jwt_expired(exp: int, now: int) -> bool. Return True when the token's exp (Unix seconds) is at or before now.",
+   "code": "from typing import *\nfrom collections import *\n\ndef jwt_expired(exp: int, now: int) -> bool:\n    return exp <= now\n",
+   "tests": [
+    "assert jwt_expired(100, 200) is True"
+   ]
+  },
+  {
+   "name": "suspicious_commandline",
+   "domain": "cyber",
+   "trust": "verified-visible",
+   "version": 1,
+   "successes": 2,
+   "uses": 0,
+   "description": "Flag suspicious command lines. Write `suspicious_commandline(cmd: str) -> list[str]` returning the sorted unique",
+   "code": "from typing import *\nfrom collections import *\n\ndef suspicious_commandline(cmd: str) -> list[str]:\n    import re\n\n    def extract_iocs(text: str) -> dict:\n        # Implementation of extract_iocs function from skills module\n        pass\n\n    def is_encoded_command(cmd: str) -> bool:\n        encoded_pattern = re.compile(r'(-e|-en|-enc|-encodedcommand\\b)[\\s]+[A-Za-z0-9+/=]{20,}')\n        return encoded_pattern.search(cmd) is not None\n\n    def is_download_cradle(cmd: str) -> bool:\n        download_patterns = [\n            r'downloadstring',\n            r'downloadfile',\n            r'invoke-webrequest',\n            r'iwr ',\n            r'start-bitstransfer',\n            r'curl\\b[^|]*\\|\\s*(ba)?sh\\b',\n            r'wget\\b[^|]*\\|\\s*(ba)?sh\\b'\n        ]\n        return any(pattern in cmd.lower() for pattern in download_patterns)\n\n    def is_hidden_window(cmd: str) -> bool:\n        hidden_pattern = re.compile(r'(-w|-windowstyle\\b)[\\s]+hidden')\n        return hidden_pattern.search(cmd) is not None\n\n    def is_execution_policy_bypass(cmd: str) -> bool:\n        bypass_pattern = re.compile(r'(-ep|-exec|-executionpolicy\\b)[\\s]+bypass')\n        return bypass_pattern.search(cmd) is not None\n\n    def is_lolbin(cmd: str) -> bool:\n        lolbin_patterns = [\n            r'certutil\\b.*-urlcache',\n            r'mshta\\b.*http(s)?',\n            r'regsvr32\\b.*\\/i:http(s)?',\n            r'rundll32\\b.*javascript:'\n        ]\n        return any(pattern in cmd.lower() for pattern in lolbin_patterns)\n\n    iocs = set()\n    if is_encoded_command(cmd):\n        iocs.add(\"encoded_command\")\n    if is_download_cradle(cmd):\n        iocs.add(\"download_cradle\")\n    if is_hidden_window(cmd):\n        iocs.add(\"hidden_window\")\n    if is_execution_policy_bypass(cmd):\n        iocs.add(\"execution_policy_bypass\")\n    if is_lolbin(cmd):\n        iocs.add(\"lolbin\")\n\n    return sorted(iocs)\n",
+   "tests": [
+    "assert suspicious_commandline('notepad.exe notes.txt') == []",
+    "assert suspicious_commandline('powershell -w hidden -c dir') == ['hidden_window']"
+   ]
+  },
+  {
+   "name": "correlate_events",
+   "domain": "threat",
+   "trust": "verified-visible",
+   "version": 1,
+   "successes": 2,
+   "uses": 0,
+   "description": "Real-time event burst correlation. Write `correlate_events(events, event_type, count, window_seconds) -> list[dict]`.",
+   "code": "from typing import *\nfrom collections import *\n\ndef correlate_events(events, event_type, count, window_seconds) -> list[dict]:\n    if not events:\n        return []\n\n    # Filter events of the specified type\n    filtered_events = [event for event in events if event['type'] == event_type]\n\n    # Sort events by timestamp\n    filtered_events.sort(key=lambda x: x['ts'])\n\n    # Dictionary to store source timestamps\n    source_timestamps = defaultdict(list)\n\n    # List to store alerts\n    alerts = []\n\n    # Process each event\n    for event in filtered_events:\n        source = event['source']\n        ts = event['ts']\n\n        # Add the timestamp to the source's list\n        source_timestamps[source].append(ts)\n\n        # Remove timestamps that are older than the window\n        while source_timestamps[source] and ts - source_timestamps[source][0] > window_seconds:\n            source_timestamps[source].pop(0)\n\n        # If the list length reaches count, emit an alert\n        if len(source_timestamps[source]) == count:\n            start_ts = source_timestamps[source].pop(0)\n            alerts.append({'source': source, 'start': start_ts, 'end': ts})\n\n    # Sort alerts by (end, source)\n    alerts.sort(key=lambda x: (x['end'], x['source']))\n\n    return alerts\n",
+   "tests": [
+    "\nev = [{'ts': t, 'type': 'auth_fail', 'source': 'A'} for t in (0, 10, 20)]\nassert correlate_events(ev, 'auth_fail', 3, 30) == [{'source': 'A', 'start': 0, 'end': 20}]\n",
+    "assert correlate_events([], 'auth_fail', 3, 30) == []"
+   ]
+  }
+ ],
+ "lessons": [
+  {
+   "domain": "coding",
+   "text": "When dealing with intervals, it's important to sort them by their start values to ensure that you can efficiently merge overlapping intervals.",
+   "uses": 19
+  },
+  {
+   "domain": "threat",
+   "text": "When processing a list of events, it's important to maintain a stable order and efficiently manage a list of timestamps for each source.",
+   "uses": 13
+  },
+  {
+   "domain": "coding",
+   "text": "LRU Cache uses an OrderedDict to maintain the order of keys based on their usage, allowing O(1) time complexity for both get and put operations.",
+   "uses": 12
+  },
+  {
+   "domain": "threat",
+   "text": "When calculating the mean of intervals, ensure that the mean is not zero to avoid division by zero.",
+   "uses": 10
+  },
+  {
+   "domain": "cyber",
+   "text": "Regular expressions are powerful for pattern matching in text data.",
+   "uses": 10
+  },
+  {
+   "domain": "cyber",
+   "text": "Regular expressions are powerful tools for pattern matching and can be used to extract specific types of information from text.",
+   "uses": 8
+  },
+  {
+   "domain": "coding",
+   "text": "When comparing version strings, ensure that all components are non-negative integers and handle missing trailing components by defaulting to 0.",
+   "uses": 8
+  },
+  {
+   "domain": "bigdata",
+   "text": "When dealing with large datasets, using efficient data structures like `Counter` from the `collections` module can significantly improve performance and readability.",
+   "uses": 6
+  },
+  {
+   "domain": "cyber",
+   "text": "Regular expressions are powerful tools for pattern matching and extraction in text.",
+   "uses": 5
+  },
+  {
+   "domain": "threat",
+   "text": "When calculating speed, ensure that the time difference is not zero to avoid division by zero errors.",
+   "uses": 4
+  },
+  {
+   "domain": "bigdata",
+   "text": "When dealing with large datasets, it's crucial to handle exceptions and edge cases such as missing keys, None values, and non-numeric strings to ensure robustness and performance.",
+   "uses": 4
+  },
+  {
+   "domain": "cyber",
+   "text": "Regular expressions are powerful tools for pattern matching in strings, but they can be complex and require careful handling to avoid false positives or negatives.",
+   "uses": 3
+  },
+  {
+   "domain": "bigdata",
+   "text": "In reservoir sampling, the algorithm ensures that each item in the stream has an equal probability of being selected, even if the stream is too large to fit into memory.",
+   "uses": 3
+  },
+  {
+   "domain": "cyber",
+   "text": "Regular expressions are powerful for pattern matching and can be used to extract specific types of data from text.",
+   "uses": 2
+  },
+  {
+   "domain": "threat",
+   "text": "Avoid using mutable default arguments in functions, as they can lead to unexpected behavior.",
+   "uses": 2
+  },
+  {
+   "domain": "cyber",
+   "text": "Understanding Unix timestamps and their use in JWTs for expiration checks.",
+   "uses": 1
+  },
+  {
+   "domain": "cyber",
+   "text": "In CVSS v3.1, a valid vector must contain exactly 8 metrics, and all metrics must be present and correctly formatted.",
+   "uses": 1
+  },
+  {
+   "domain": "bigdata",
+   "text": "When dealing with large datasets, ensure efficient memory usage by using a defaultdict to accumulate results.",
+   "uses": 1
+  },
+  {
+   "domain": "threat",
+   "text": "When using statistical functions like `statistics.pstdev`, ensure that the data is properly formatted and that the function is imported from the correct module.",
+   "uses": 0
+  },
+  {
+   "domain": "bigdata",
+   "text": "When working with large datasets, using efficient data structures like Counter is crucial for counting and retrieving frequent items.",
+   "uses": 0
+  }
+ ],
+ "knowledge": [
+  [
+   "jwt",
+   "property",
+   "now (current time)"
+  ],
+  [
+   "jwt",
+   "property",
+   "exp (expiration)"
+  ],
+  [
+   "jwt",
+   "relation",
+   "json web token"
+  ],
+  [
+   "unix timestamp",
+   "relation",
+   "seconds since january 1, 1970"
+  ],
+  [
+   "jitter",
+   "relation",
+   "population standard deviation of intervals divided by mean interval"
+  ],
+  [
+   "mean",
+   "relation",
+   "sum of intervals divided by number of intervals"
+  ],
+  [
+   "statistics.pstdev",
+   "relation",
+   "imported from statistics module"
+  ],
+  [
+   "speed",
+   "rounded",
+   "round(speed_kmh, 1)"
+  ],
+  [
+   "speed",
+   "calculated",
+   "distance / (time difference / 3600)"
+  ],
+  [
+   "regular expression",
+   "quantifiers",
+   "braces"
+  ],
+  [
+   "regular expression",
+   "case-insensitivity",
+   "lowercase"
+  ],
+  [
+   "regular expression",
+   "grouping",
+   "parentheses"
+  ],
+  [
+   "regular expression",
+   "pattern matching",
+   "text"
+  ],
+  [
+   "sorted",
+   "function",
+   "can be used to sort lists of tuples based on specific criteria"
+  ],
+  [
+   "mutable default arguments",
+   "avoid",
+   "unexpected behavior"
+  ],
+  [
+   "distance",
+   "checked",
+   "0"
+  ],
+  [
+   "time difference",
+   "checked",
+   "0"
+  ],
+  [
+   "speed",
+   "calculated",
+   "distance / (time / 3600)"
+  ],
+  [
+   "distance",
+   "calculated",
+   "haversine formula"
+  ],
+  [
+   "cvss vector",
+   "must contain",
+   "correctly formatted metrics"
+  ],
+  [
+   "cvss vector",
+   "must contain",
+   "all metrics"
+  ],
+  [
+   "cvss vector",
+   "must contain",
+   "exactly 8 metrics"
+  ],
+  [
+   "defaultdict",
+   "initializes",
+   "default values for missing keys"
+  ],
+  [
+   "lambda function",
+   "defines",
+   "initial values"
+  ],
+  [
+   "defaultdict",
+   "uses",
+   "lambda function"
+  ],
+  [
+   "regular expression",
+   "split",
+   "dotted quads"
+  ],
+  [
+   "regular expression",
+   "set",
+   "unique"
+  ],
+  [
+   "regular expression",
+   "findall",
+   "extract"
+  ],
+  [
+   "regular expression",
+   "match",
+   "pattern"
+  ],
+  [
+   "mean of zero intervals",
+   "is",
+   "undefined"
+  ],
+  [
+   "division by zero",
+   "causes",
+   "undefined behavior"
+  ],
+  [
+   "population stdev",
+   "divides by",
+   "n"
+  ],
+  [
+   "mean",
+   "divides by",
+   "n"
+  ],
+  [
+   "regular expression",
+   "pattern",
+   "non-greedy match"
+  ],
+  [
+   "regular expression",
+   "pattern",
+   "case-insensitive"
+  ],
+  [
+   "regular expression",
+   "compile",
+   "pattern"
+  ],
+  [
+   "regular expression",
+   "search",
+   "pattern"
+  ],
+  [
+   "timestamp list",
+   "pop",
+   "ts"
+  ],
+  [
+   "timestamp list",
+   "pop",
+   "first_ts"
+  ],
+  [
+   "timestamp list",
+   "append",
+   "ts"
+  ],
+  [
+   "stable order",
+   "sort by",
+   "ts"
+  ],
+  [
+   "division",
+   "count",
+   "sum"
+  ],
+  [
+   "min",
+   "max",
+   "comparison operations"
+  ],
+  [
+   "defaultdict",
+   "lambda function",
+   "default value"
+  ],
+  [
+   "exception handling",
+   "try-except",
+   "valueerror"
+  ],
+  [
+   "stream",
+   "too large",
+   "fit into memory"
+  ],
+  [
+   "algorithm",
+   "ensures",
+   "equal probability"
+  ],
+  [
+   "probability",
+   "equal",
+   "each item"
+  ],
+  [
+   "k",
+   "parameter",
+   "specifies the number of top frequent items to return"
+  ],
+  [
+   "stream",
+   "iterable",
+   "can be any iterable, including generators"
+  ],
+  [
+   "most_common",
+   "method",
+   "returns the k most common elements and their counts from the most common to the least"
+  ],
+  [
+   "counter",
+   "class",
+   "used for counting hashable objects"
+  ],
+  [
+   "regular expression",
+   "lowercase",
+   "converts text to lowercase"
+  ],
+  [
+   "regular expression",
+   "set",
+   "ensures uniqueness"
+  ],
+  [
+   "regular expression",
+   "findall",
+   "extracts all occurrences"
+  ],
+  [
+   "regular expression",
+   "matches",
+   "pattern"
+  ],
+  [
+   "dictionary",
+   "update",
+   "update(dict)"
+  ],
+  [
+   "dictionary",
+   "get",
+   "get(key, default)"
+  ],
+  [
+   "dictionary",
+   "items",
+   "items()"
+  ],
+  [
+   "regular expression",
+   "search",
+   "re.search"
+  ],
+  [
+   "ordereddict",
+   "capacity",
+   "maximum size"
+  ],
+  [
+   "ordereddict",
+   "popitem",
+   "least recently used"
+  ],
+  [
+   "ordereddict",
+   "move_to_end",
+   "recently used"
+  ],
+  [
+   "ordereddict",
+   "maintains order",
+   "keys"
+  ],
+  [
+   "append",
+   "adds",
+   "element to end of list"
+  ],
+  [
+   "max",
+   "returns",
+   "larger of two values"
+  ],
+  [
+   "sort",
+   "by",
+   "key"
+  ],
+  [
+   "version_compare",
+   "returns",
+   "1"
+  ],
+  [
+   "version_compare",
+   "returns",
+   "0"
+  ],
+  [
+   "version_compare",
+   "returns",
+   "-1"
+  ],
+  [
+   "version_compare",
+   "returns",
+   "int"
+  ]
+ ],
+ "focus": {
+  "weights": {
+   "coding": 0.0,
+   "cyber": 0.567,
+   "bigdata": 0.0,
+   "threat": 0.433
+  },
+  "next_training": [
+   "cyber",
+   "threat"
+  ]
+ },
+ "feedback": {
+  "kinds": {},
+  "ids": []
+ },
+ "recent_episodes": [
+  {
+   "ts": 1795548772.2060955,
+   "task": "threat.correlate",
+   "mode": "train",
+   "solved": true,
+   "attempts": 1
+  },
+  {
+   "ts": 1795548682.7328854,
+   "task": "cyber.jwt_expiry",
+   "mode": "train",
+   "solved": true,
+   "attempts": 1
+  },
+  {
+   "ts": 1795548608.2373977,
+   "task": "threat.beaconing",
+   "mode": "train",
+   "solved": false,
+   "attempts": 3
+  },
+  {
+   "ts": 1795548375.5995774,
+   "task": "threat.impossible_travel",
+   "mode": "train",
+   "solved": false,
+   "attempts": 2
+  },
+  {
+   "ts": 1795548106.3692062,
+   "task": "cyber.suspicious_cmdline",
+   "mode": "manual",
+   "solved": true,
+   "attempts": 1
+  },
+  {
+   "ts": 1795247035.6271856,
+   "task": "cyber.extract_iocs",
+   "mode": "manual",
+   "solved": true,
+   "attempts": 1
+  },
+  {
+   "ts": 1795215222.4299443,
+   "task": "cyber.extract_iocs",
+   "mode": "manual",
+   "solved": true,
+   "attempts": 1
+  },
+  {
+   "ts": 1795213921.0489879,
+   "task": "bigdata.top_k",
+   "mode": "train",
+   "solved": true,
+   "attempts": 1
+  },
+  {
+   "ts": 1795213833.1580575,
+   "task": "threat.beaconing",
+   "mode": "train",
+   "solved": false,
+   "attempts": 4
+  },
+  {
+   "ts": 1795117013.5404475,
+   "task": "threat.impossible_travel",
+   "mode": "train",
+   "solved": false,
+   "attempts": 4
+  },
+  {
+   "ts": 1795070248.783555,
+   "task": "cyber.cvss31",
+   "mode": "manual",
+   "solved": false,
+   "attempts": 4
+  },
+  {
+   "ts": 1795069431.3283393,
+   "task": "bigdata.group_aggregate",
+   "mode": "manual",
+   "solved": true,
+   "attempts": 1
+  },
+  {
+   "ts": 1794894917.8215623,
+   "task": "cyber.extract_iocs",
+   "mode": "train",
+   "solved": true,
+   "attempts": 1
+  },
+  {
+   "ts": 1794894765.4277472,
+   "task": "threat.beaconing",
+   "mode": "train",
+   "solved": false,
+   "attempts": 4
+  },
+  {
+   "ts": 1794894486.0656195,
+   "task": "threat.impossible_travel",
+   "mode": "train",
+   "solved": false,
+   "attempts": 4
+  },
+  {
+   "ts": 1794893932.7807977,
+   "task": "cyber.suspicious_cmdline",
+   "mode": "train",
+   "solved": true,
+   "attempts": 2
+  },
+  {
+   "ts": 1794776751.039637,
+   "task": "threat.correlate",
+   "mode": "train",
+   "solved": true,
+   "attempts": 1
+  },
+  {
+   "ts": 1794776648.8704422,
+   "task": "bigdata.group_aggregate",
+   "mode": "train",
+   "solved": true,
+   "attempts": 1
+  },
+  {
+   "ts": 1794776572.4539876,
+   "task": "bigdata.reservoir",
+   "mode": "train",
+   "solved": true,
+   "attempts": 1
+  },
+  {
+   "ts": 1794776532.9399714,
+   "task": "bigdata.top_k",
+   "mode": "train",
+   "solved": true,
+   "attempts": 1
+  },
+  {
+   "ts": 1794776489.8013442,
+   "task": "cyber.suspicious_cmdline",
+   "mode": "train",
+   "solved": false,
+   "attempts": 4
+  },
+  {
+   "ts": 1794775961.8922443,
+   "task": "cyber.extract_iocs",
+   "mode": "train",
+   "solved": true,
+   "attempts": 1
+  },
+  {
+   "ts": 1794775857.833827,
+   "task": "cyber.ssh_bruteforce",
+   "mode": "train",
+   "solved": true,
+   "attempts": 1
+  },
+  {
+   "ts": 1794775815.8366184,
+   "task": "coding.lru_cache",
+   "mode": "train",
+   "solved": true,
+   "attempts": 1
+  },
+  {
+   "ts": 1794775759.2825284,
+   "task": "coding.merge_intervals",
+   "mode": "train",
+   "solved": true,
+   "attempts": 1
+  },
+  {
+   "ts": 1794775716.992647,
+   "task": "coding.version_compare",
+   "mode": "train",
+   "solved": true,
+   "attempts": 1
+  }
+ ]
+}
