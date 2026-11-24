@@ -173,6 +173,7 @@ class CortexAgent:
         lessons = self.mem.search_lessons(query, k=5)
         facts = self.mem.related_knowledge(query, k=8)
         past = self.mem.past_reflections(task.id, n=2)
+        struggles = self.mem.past_struggles(task.id, n=3)
         parts = [f"## Domain focus\n{DOMAIN_FOCUS.get(task.domain, task.domain)}",
                  f"## Task: {task.title}\n{task.prompt}",
                  "## Example tests (your code must pass these; hidden tests also apply)\n"
@@ -188,6 +189,19 @@ class CortexAgent:
         if past:
             parts.append("## Your notes from previous attempts at this exact task\n" +
                          "\n".join(f"- {p}" for p in past))
+        if struggles:
+            # Show the approaches that already failed (closest first) so it builds on them
+            # instead of repeating them. This is how it eventually solves a hard task.
+            lines = ["## Approaches you ALREADY TRIED that did NOT work - do not repeat these; "
+                     "fix the specific error or try a different approach"]
+            best_code, best_reason, best_rate = struggles[0]
+            for _, reason, rate in struggles:
+                lines.append(f"- failed ({rate:.0%} of visible tests passed): {reason or 'did not pass'}")
+            if best_rate > 0:
+                trimmed = "\n".join(best_code.splitlines()[:25])
+                lines.append("Your closest attempt (still wrong - fix the error above, keep what worked):\n"
+                             f"```python\n{trimmed}\n```")
+            parts.append("\n".join(lines))
         parts.append(f"Write the complete module defining `{task.entry_point}`.")
         return "\n\n".join(parts), lessons, {s.name: s.code for s in skills}
 
@@ -224,8 +238,23 @@ class CortexAgent:
         seen_code: set[str] = set()
         same_reason, last_reason = 0, None
         stopped_early = ""
+        diversified = False
         for attempts in range(1, self.max_attempts + 1):
-            r = self.llm.complete(SYSTEM, messages, max_tokens=1800)
+            # Raise temperature once it has stalled, so it explores a genuinely different idea
+            # instead of nudging the same wrong one. On the final attempt, force a fresh approach.
+            if diversified and same_reason == 0:
+                temperature = 0.85       # the just-triggered "different approach" attempt
+            elif same_reason <= 1 and not seen_code:
+                temperature = 0.2
+            elif attempts < self.max_attempts:
+                temperature = 0.5
+            else:
+                temperature = 0.85
+            sys_prompt = SYSTEM
+            if temperature >= 0.85 and (seen_code or same_reason > 1 or diversified):
+                sys_prompt = SYSTEM + ("\n\nIMPORTANT: your previous approach is not working. Start over with a "
+                                       "fundamentally different algorithm or structure - do not tweak the last attempt.")
+            r = self.llm.complete(sys_prompt, messages, max_tokens=1800, temperature=temperature)
             tokens += r.tokens
             code = clean_solution(extract_code(r.text))
             result = run_tests(code, task.visible_tests, skills=skill_code,
@@ -243,6 +272,8 @@ class CortexAgent:
                 best_rate, best_code = result.pass_rate, code
             if result.all_passed:
                 break
+            if self.learn and not result.policy:
+                self.mem.record_struggle(task.id, code, why or result.failure_report(1)[:200], result.pass_rate)
             # Stuck detection: a small model that repeats itself won't succeed on attempt 8 -
             # stop and let the next generation try again with the lesson from this one.
             norm = "\n".join(l.rstrip() for l in code.strip().splitlines())
@@ -252,6 +283,19 @@ class CortexAgent:
                 stopped_early = "it wrote the same code again"
             elif self.stuck_after and same_reason > self.stuck_after:
                 stopped_early = f"the same mistake {same_reason} times in a row"
+            # Before giving up on a stuck task, spend one attempt on a genuinely different
+            # approach (high temperature, explicit "start over"). That's often what breaks through.
+            if stopped_early and not diversified and attempts < self.max_attempts:
+                diversified = True
+                stopped_early = ""
+                self.log("    stuck - trying a fundamentally different approach")
+                messages = [first, {"role": "user", "content":
+                            "Your previous approaches all failed the same way:\n\n" + result.failure_report(2) +
+                            "\n\nThat whole approach is wrong. Start over with a completely different algorithm "
+                            f"or data structure and write the full module defining `{task.entry_point}`."}]
+                seen_code.add(norm)
+                same_reason = 0
+                continue
             if stopped_early:
                 self.log(f"    stopping early: {stopped_early} (saves time - it will retry next round)")
                 break
@@ -265,6 +309,8 @@ class CortexAgent:
                          "\n\nDiagnose the root cause, then return the complete corrected module."}]
         solved = bool(result and result.all_passed)
         final = code if solved else best_code
+        if self.learn and solved:
+            self.mem.clear_struggles(task.id)      # cracked it - the failed-approach history is spent
         used = skills_used(final)
         out = Outcome(task.id, solved, attempts, max(best_rate, 0.0), final, tokens,
                       0.0, used, history=history)

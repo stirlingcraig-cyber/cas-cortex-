@@ -93,6 +93,23 @@ Training stays on the PC because it needs the local AI model. To send results to
 
 Only learning data is published. **Alerts and log contents are never published**, because the repo is public.
 
+## Learns from its mistakes until it solves
+
+When Cortex can't solve a task first time, it records each failed approach and the error it hit, then feeds those
+back on the next attempt so it builds on what was close instead of repeating it. If it stalls it raises the model's
+temperature to explore a different idea, and spends one attempt starting over from scratch before giving up. Failed
+approaches persist, so a parked task that returns days later already knows what didn't work — that's how it eventually
+cracks hard tasks. The history is cleared the moment it solves.
+
+## Task packs
+
+`.\cortex add-pack <name>` (or the **Teach** tab → **Ready-made packs**) adds a ready-made set of tasks, then train:
+
+* **automotive** — CAS OBD skills: decode fault codes, convert live-data bytes, triage by harm, summarise a log.
+* **appsec** — defensive web-security *detection*: spot SQL injection, XSS, path traversal, insecure code patterns,
+  missing security headers, and classify a web attack. These recognise attacks and vulnerable code (the scanner /
+  IDS side); they don't generate exploits.
+
 ## Fast, hands-off training
 
 * **Train tab → How long: For 2 hours / Until mastered**, tick *Evaluate* (and *Publish to iPhone*), and walk away.

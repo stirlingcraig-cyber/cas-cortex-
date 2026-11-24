@@ -816,11 +816,14 @@ class CortexApp(tk.Tk):
                                       "fall within any 60-second window, otherwise False.")
         lb = ttk.Button(a, text="Learn it", style="Accent.TButton", command=self._learn)
         lb.grid(row=3, column=1, sticky="w", padx=6, pady=10)
-        pk = ttk.Button(a, text="Add automotive task pack (CAS OBD)", command=lambda: self.run(
-            "pack", ["add-pack", "automotive"], self.teach_con, label="Adding task pack...",
-            done=lambda rc: (self.refresh_teach(), self.refresh_train(), self.refresh_home())))
-        pk.grid(row=3, column=2, columnspan=2, sticky="w", padx=6, pady=10)
-        self._reg([lb, pk])
+        packs = ttk.Frame(a, style="Page.TFrame"); packs.grid(row=3, column=2, columnspan=2, sticky="w", padx=6, pady=10)
+        ttk.Label(packs, text="Ready-made packs:").pack(side="left", padx=(0, 6))
+        _addpack = lambda name: self.run("pack", ["add-pack", name], self.teach_con, label="Adding task pack...",
+                                         done=lambda rc: (self.refresh_teach(), self.refresh_train(), self.refresh_home()))
+        pk1 = ttk.Button(packs, text="Car (CAS OBD)", command=lambda: _addpack("automotive"))
+        pk2 = ttk.Button(packs, text="Web security", command=lambda: _addpack("appsec"))
+        pk1.pack(side="left", padx=(0, 6)); pk2.pack(side="left")
+        self._reg([lb, pk1, pk2])
         a.columnconfigure(3, weight=1); a.rowconfigure(4, weight=1)
         self.teach_con = Console(a, height=10)
         self.teach_con.grid(row=4, column=0, columnspan=4, sticky="nsew")

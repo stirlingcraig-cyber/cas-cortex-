@@ -32,7 +32,11 @@ CREATE TABLE IF NOT EXISTS triples(
 CREATE TABLE IF NOT EXISTS eval_runs(
     run_id TEXT, ts REAL, generation INTEGER, task_id TEXT, domain TEXT, split TEXT,
     score REAL, attempts INTEGER, tokens INTEGER);
+CREATE TABLE IF NOT EXISTS struggles(
+    id INTEGER PRIMARY KEY, ts REAL, task_id TEXT, code_hash TEXT, code TEXT, reason TEXT, pass_rate REAL,
+    UNIQUE(task_id, code_hash));
 CREATE INDEX IF NOT EXISTS ep_task ON episodes(task_id);
+CREATE INDEX IF NOT EXISTS st_task ON struggles(task_id);
 """
 
 
@@ -102,6 +106,28 @@ class Memory:
         rows = self.db.execute("""SELECT reflection FROM episodes WHERE task_id=? AND reflection != ''
                                   ORDER BY id DESC LIMIT ?""", (task_id, n)).fetchall()
         return [r["reflection"] for r in rows]
+
+    def record_struggle(self, task_id: str, code: str, reason: str, pass_rate: float) -> None:
+        """Remember a distinct attempt that did NOT solve a task, with the error it hit, so future
+        attempts can avoid repeating it and build toward a solution."""
+        import hashlib
+        norm = "\n".join(l.rstrip() for l in (code or "").strip().splitlines())
+        if not norm:
+            return
+        h = hashlib.sha1(norm.encode()).hexdigest()[:16]
+        self._write("""INSERT INTO struggles(ts, task_id, code_hash, code, reason, pass_rate)
+                       VALUES(?,?,?,?,?,?)
+                       ON CONFLICT(task_id, code_hash) DO UPDATE SET ts=excluded.ts, reason=excluded.reason""",
+                    (time.time(), task_id, h, norm[:2000], (reason or "")[:300], pass_rate))
+
+    def past_struggles(self, task_id: str, n: int = 3) -> list[tuple[str, str, float]]:
+        """Distinct failed approaches for a task, closest-to-passing first: (code, reason, pass_rate)."""
+        rows = self.db.execute("""SELECT code, reason, pass_rate FROM struggles WHERE task_id=?
+                                  ORDER BY pass_rate DESC, id DESC LIMIT ?""", (task_id, n)).fetchall()
+        return [(r["code"], r["reason"], r["pass_rate"]) for r in rows]
+
+    def clear_struggles(self, task_id: str) -> None:
+        self._write("DELETE FROM struggles WHERE task_id=?", (task_id,))
 
     # ------------------------------------------------------------ procedural
     def upsert_skill(self, *, name, domain, description, code, tests, trust) -> str:

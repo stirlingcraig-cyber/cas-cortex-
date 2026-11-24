@@ -49,16 +49,18 @@ def test_stops_early_when_the_model_repeats_itself(mem, audit):
     llm = FakeLLM([bad] * 8 + ['{"lesson": "Sort by start first.", "knowledge": []}'])
     logs = []
     o = CortexAgent(llm, mem, audit, max_attempts=8, log=logs.append).solve(T["coding.merge_intervals"].public_view())
-    assert o.attempts == 2 and not o.solved                   # not 8
-    assert any("stopping early" in l for l in logs)
+    assert o.attempts == 3 and not o.solved                   # not 8: 1 repeat + 1 diversified try, then stop
+    assert any("different approach" in l for l in logs) and any("stopping early" in l for l in logs)
 
 
 def test_stops_early_on_the_same_mistake_in_different_code(mem, audit):
     codes = [f"```python\ndef merge_intervals(x):\n    y = {i}\n    raise KeyError('k')\n```" for i in range(8)]
     llm = FakeLLM(codes + ["{}"])
-    o = CortexAgent(llm, mem, audit, max_attempts=8, stuck_after=2, log=quiet).solve(
+    logs = []
+    o = CortexAgent(llm, mem, audit, max_attempts=8, stuck_after=2, log=logs.append).solve(
         T["coding.merge_intervals"].public_view())
-    assert o.attempts == 3
+    assert 3 < o.attempts <= 6 and not o.solved               # one diversified attempt, then give up
+    assert any("different approach" in l for l in logs)
 
 
 def test_retry_prompt_carries_only_the_latest_attempt(mem, audit):
@@ -168,3 +170,32 @@ def test_speed_test_reports_cpu_and_suggests_faster_model(tmp_path, clean_env):
     assert r["gen_tps"] == 4.0 and r["gpu_share"] == 0.0
     text = "\n".join(lines)
     assert "CPU only" in text and "qwen2.5-coder:3b" in text and "graphics card" in text
+
+
+def test_records_failures_and_shows_them_next_time(mem, audit):
+    """It remembers each failed approach and feeds them back so it stops repeating them."""
+    from cortex.agent import REFLECT_SYSTEM
+    from conftest import BY_ENTRY
+    bad1 = "```python\ndef merge_intervals(x):\n    return x\n```"
+    bad2 = "```python\ndef merge_intervals(x):\n    return sorted(x)\n```"
+    good = "```python\n" + BY_ENTRY["merge_intervals"] + "\n```"
+    # round 1: two distinct failures recorded, task not solved
+    llm = FakeLLM([bad1, bad2, "{}"])
+    CortexAgent(llm, mem, audit, max_attempts=2, stuck_after=5, log=quiet).solve(T["coding.merge_intervals"].public_view())
+    st = mem.past_struggles("coding.merge_intervals")
+    assert len(st) == 2
+    # round 2: the prompt now warns about the approaches that failed
+    llm2 = FakeLLM([good, "{}"])
+    agent = CortexAgent(llm2, mem, audit, log=quiet)
+    prompt = agent._context(T["coding.merge_intervals"].public_view())[0]
+    assert "ALREADY TRIED" in prompt and "did NOT work" in prompt
+    o = agent.solve(T["coding.merge_intervals"].public_view())
+    assert o.solved and mem.past_struggles("coding.merge_intervals") == []    # cleared once solved
+
+
+def test_temperature_rises_when_stuck(mem, audit):
+    bad = "```python\ndef merge_intervals(x):\n    return x\n```"
+    llm = FakeLLM([bad] * 6 + ["{}"])
+    CortexAgent(llm, mem, audit, max_attempts=6, stuck_after=5, log=quiet).solve(T["coding.merge_intervals"].public_view())
+    temps = [t for t in llm.temps if t is not None]
+    assert temps[0] == 0.2 and max(temps) >= 0.85          # starts focused, escalates to explore

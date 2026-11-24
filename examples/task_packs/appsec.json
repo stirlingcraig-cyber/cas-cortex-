@@ -1,0 +1,131 @@
+[
+  {
+    "id": "cyber.detect_sqli",
+    "domain": "cyber",
+    "split": "train",
+    "title": "Detect SQL injection attempts",
+    "entry_point": "detect_sqli",
+    "prompt": "DEFENSIVE detection for a web firewall. Write `detect_sqli(value: str) -> bool` returning True if a request value looks like an SQL-injection attempt. Matching is case-insensitive. Flag it if it contains any of: a tautology like ' or 1=1 or ' or '1'='1 (a quote, then or, then number = same-looking number); `union select`; `drop table`; a semicolon then drop/delete/insert/update; a quote immediately followed by a comment -- or #; a /* */ comment; xp_cmdshell; or a time-delay call sleep(, benchmark(, pg_sleep( or `waitfor delay`. Otherwise return False. This only RECOGNISES attacks; it never builds them.",
+    "visible_tests": [
+      "assert detect_sqli(\"' OR 1=1 --\") is True",
+      "assert detect_sqli('normal search term') is False"
+    ],
+    "hidden_tests": [
+      "assert detect_sqli(\"admin'--\") is True",
+      "assert detect_sqli('1 UNION SELECT username, password FROM users') is True",
+      "assert detect_sqli(\"'; DROP TABLE users;\") is True",
+      "assert detect_sqli(\"x' or '1'='1\") is True",
+      "assert detect_sqli('product WAITFOR DELAY 0:0:5') is True",
+      "assert detect_sqli('SELECT name FROM products WHERE id = 5') is False",
+      "assert detect_sqli(\"O'Brien\") is False",
+      "assert detect_sqli('') is False",
+      "assert detect_sqli('1 AND sleep(5)') is True"
+    ]
+  },
+  {
+    "id": "cyber.detect_xss",
+    "domain": "cyber",
+    "split": "train",
+    "title": "Detect cross-site scripting",
+    "entry_point": "detect_xss",
+    "prompt": "DEFENSIVE detection. Write `detect_xss(value: str) -> bool` returning True if a value contains a cross-site-scripting payload (case-insensitive): an opening <script or closing </script> tag; a javascript: URI; an inline event handler onerror= onload= onclick= onmouseover= or onfocus= (optional spaces before =); a <svg or <iframe tag; or document.cookie. Otherwise False. Recognises only; does not generate payloads.",
+    "visible_tests": [
+      "assert detect_xss('<script>alert(1)</script>') is True",
+      "assert detect_xss('hello world') is False"
+    ],
+    "hidden_tests": [
+      "assert detect_xss('<IMG SRC=x onerror=alert(1)>') is True",
+      "assert detect_xss('<a href=\"javascript:evil()\">x</a>') is True",
+      "assert detect_xss('<svg onload=alert(1)>') is True",
+      "assert detect_xss('<iframe src=//evil></iframe>') is True",
+      "assert detect_xss('steal document.cookie') is True",
+      "assert detect_xss('2 < 3 and 4 > 1') is False",
+      "assert detect_xss('I love javascript programming') is False",
+      "assert detect_xss('<b>bold</b>') is False"
+    ]
+  },
+  {
+    "id": "cyber.detect_path_traversal",
+    "domain": "cyber",
+    "split": "train",
+    "title": "Detect path traversal",
+    "entry_point": "detect_path_traversal",
+    "prompt": "DEFENSIVE detection. Write `detect_path_traversal(value: str) -> bool` returning True if a value looks like a directory-traversal attempt (case-insensitive): it contains ../ or ..\\\\ ; a URL-encoded dot-dot (%2e%2e, optionally followed by %2f or %5c) or ..%2f ; or a known sensitive target /etc/passwd, /etc/shadow, boot.ini or win.ini. Otherwise False.",
+    "visible_tests": [
+      "assert detect_path_traversal('../../etc/passwd') is True",
+      "assert detect_path_traversal('report.pdf') is False"
+    ],
+    "hidden_tests": [
+      "assert detect_path_traversal('..\\\\..\\\\windows\\\\win.ini') is True",
+      "assert detect_path_traversal('%2e%2e%2f%2e%2e%2fetc') is True",
+      "assert detect_path_traversal('file=..%2f..%2fboot.ini') is True",
+      "assert detect_path_traversal('/etc/passwd') is True",
+      "assert detect_path_traversal('/var/www/html/index.php') is False",
+      "assert detect_path_traversal('my.notes.txt') is False",
+      "assert detect_path_traversal('') is False"
+    ]
+  },
+  {
+    "id": "cyber.scan_code_vulns",
+    "domain": "cyber",
+    "split": "train",
+    "title": "Flag insecure code patterns",
+    "entry_point": "scan_code_vulns",
+    "prompt": "DEFENSIVE static analysis (like a code scanner). Write `scan_code_vulns(code: str) -> list[str]` returning the sorted unique indicator names found in a snippet of Python source. Detect (case-insensitive where sensible):\n- 'code_execution': a call eval( or exec(\n- 'command_injection': os.system( , or subprocess with shell=True\n- 'hardcoded_secret': an assignment of password/passwd/api_key/apikey/secret/token to a quoted string of length >= 3, or an AWS key matching AKIA followed by 16 upper-case letters or digits\n- 'weak_hash': hashlib.md5( or hashlib.sha1( (or a bare md5(/sha1( call)\n- 'insecure_deserialization': pickle.load( or pickle.loads( , yaml.load( without a Loader= argument, or marshal.loads(\n- 'disabled_tls_verification': verify=False , or ssl._create_unverified_context\nReturn [] if none are present. This only FLAGS risky patterns for review.",
+    "visible_tests": [
+      "assert scan_code_vulns('x = eval(user_input)') == ['code_execution']",
+      "assert scan_code_vulns('print(\"hello\")') == []"
+    ],
+    "hidden_tests": [
+      "assert scan_code_vulns('import os\\nos.system(\"rm \" + name)') == ['command_injection']",
+      "assert scan_code_vulns('password = \"hunter2\"') == ['hardcoded_secret']",
+      "assert scan_code_vulns('h = hashlib.md5(pw).hexdigest()') == ['weak_hash']",
+      "assert scan_code_vulns('data = pickle.loads(blob)') == ['insecure_deserialization']",
+      "assert scan_code_vulns('r = requests.get(u, verify=False)') == ['disabled_tls_verification']",
+      "assert scan_code_vulns('cfg = yaml.load(f)') == ['insecure_deserialization']",
+      "assert scan_code_vulns('cfg = yaml.load(f, Loader=yaml.SafeLoader)') == []",
+      "assert scan_code_vulns('k = \"AKIAIOSFODNN7EXAMPLE\"') == ['hardcoded_secret']",
+      "assert scan_code_vulns('subprocess.run(cmd, shell=True)\\neval(x)') == ['code_execution', 'command_injection']",
+      "assert scan_code_vulns('total = a + b') == []"
+    ]
+  },
+  {
+    "id": "cyber.check_security_headers",
+    "domain": "cyber",
+    "split": "train",
+    "title": "Find missing security headers",
+    "entry_point": "missing_security_headers",
+    "prompt": "DEFENSIVE check. Write `missing_security_headers(headers: dict) -> list[str]` given a response's HTTP headers (a dict of header-name -> value). Return the sorted list of recommended security headers that are ABSENT, matching names case-insensitively, from exactly: Content-Security-Policy, Referrer-Policy, Strict-Transport-Security, X-Content-Type-Options, X-Frame-Options. Return the canonical spellings just listed. [] means all are present.",
+    "visible_tests": [
+      "assert missing_security_headers({}) == ['Content-Security-Policy', 'Referrer-Policy', 'Strict-Transport-Security', 'X-Content-Type-Options', 'X-Frame-Options']",
+      "assert missing_security_headers({'content-security-policy': \"default-src 'self'\", 'referrer-policy': 'no-referrer', 'strict-transport-security': 'max-age=1', 'x-content-type-options': 'nosniff', 'x-frame-options': 'DENY'}) == []"
+    ],
+    "hidden_tests": [
+      "assert missing_security_headers({'X-Frame-Options': 'DENY', 'Content-Type': 'text/html'}) == ['Content-Security-Policy', 'Referrer-Policy', 'Strict-Transport-Security', 'X-Content-Type-Options']",
+      "assert missing_security_headers({'STRICT-TRANSPORT-SECURITY': 'max-age=31536000'}) == ['Content-Security-Policy', 'Referrer-Policy', 'X-Content-Type-Options', 'X-Frame-Options']",
+      "assert missing_security_headers({'x-frame-options': 'SAMEORIGIN', 'x-content-type-options': 'nosniff', 'referrer-policy': 'same-origin', 'content-security-policy': 'x', 'strict-transport-security': 'y'}) == []"
+    ]
+  },
+  {
+    "id": "cyber.classify_web_attack",
+    "domain": "cyber",
+    "split": "holdout",
+    "title": "Classify a web attack",
+    "entry_point": "classify_web_attack",
+    "prompt": "DEFENSIVE classification for an intrusion-detection system. Write `classify_web_attack(value: str) -> str` returning which single attack class a request value best matches, checked in this priority order, first match wins: 'sqli' (a tautology ' or 1=1 / ' or '1'='1, union select, or a quote then -- comment); 'xss' (<script, javascript:, or an on...= event handler); 'path_traversal' (../ , ..\\\\ , or %2e%2e); 'command_injection' (a shell metacharacter ; | || && or backticks or $( immediately followed by a command word such as cat ls id whoami nc curl wget bash sh); 'ssrf' (a URL to 127.0.0.1, localhost, 169.254.169.254, 0.0.0.0, [::1], or a file:// or gopher:// scheme). If none match, return 'none'. Recognises only.",
+    "visible_tests": [
+      "assert classify_web_attack(\"' OR 1=1--\") == 'sqli'",
+      "assert classify_web_attack('hello') == 'none'"
+    ],
+    "hidden_tests": [
+      "assert classify_web_attack('<script>alert(1)</script>') == 'xss'",
+      "assert classify_web_attack('../../etc/passwd') == 'path_traversal'",
+      "assert classify_web_attack('; cat /etc/passwd') == 'command_injection'",
+      "assert classify_web_attack('http://169.254.169.254/latest/meta-data/') == 'ssrf'",
+      "assert classify_web_attack('url=file:///etc/passwd') == 'ssrf'",
+      "assert classify_web_attack('name=John') == 'none'",
+      "assert classify_web_attack('1 UNION SELECT 1,2') == 'sqli'",
+      "assert classify_web_attack('`whoami`') == 'command_injection'"
+    ]
+  }
+]

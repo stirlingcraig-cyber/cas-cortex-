@@ -37,7 +37,7 @@ class LLM:
         return stop, max_tokens
 
     def complete(self, system: str, messages: list[dict], max_tokens: int = 4000,
-                 stop: list[str] | None = None) -> LLMResponse:
+                 stop: list[str] | None = None, temperature: float | None = None) -> LLMResponse:
         raise NotImplementedError
 
 
@@ -52,9 +52,11 @@ class AnthropicLLM(LLM):
         self.client = anthropic.Anthropic()  # reads ANTHROPIC_API_KEY
         self.model = model
 
-    def complete(self, system, messages, max_tokens=4000, stop=None):
+    def complete(self, system, messages, max_tokens=4000, stop=None, temperature=None):
         stop, max_tokens = self._limits(stop, max_tokens)
         kw = {"stop_sequences": stop} if stop else {}
+        if temperature is not None:
+            kw["temperature"] = temperature
         r = self.client.messages.create(model=self.model, max_tokens=max_tokens,
                                         system=system, messages=messages, **kw)
         text = "".join(getattr(b, "text", "") for b in r.content)
@@ -67,12 +69,13 @@ class OllamaLLM(LLM):
     def __init__(self, model: str, url: str = "http://localhost:11434", num_ctx: int = 16384):
         self.model, self.url, self.num_ctx = model, url.rstrip("/"), num_ctx
 
-    def complete(self, system, messages, max_tokens=4000, stop=None):
+    def complete(self, system, messages, max_tokens=4000, stop=None, temperature=None):
         stop, max_tokens = self._limits(stop, max_tokens)
         # Ollama's default context window is small and silently truncates long prompts,
         # which would cut off the skills and lessons Cortex relies on - so set it explicitly.
         body = {"model": self.model, "stream": False, "keep_alive": "30m",
-                "options": {"num_predict": max_tokens, "num_ctx": self.num_ctx, "temperature": 0.2,
+                "options": {"num_predict": max_tokens, "num_ctx": self.num_ctx,
+                            "temperature": 0.2 if temperature is None else temperature,
                             **({"stop": stop} if stop else {})},
                 "messages": [{"role": "system", "content": system}] + messages}
         d = _post_json(self.url + "/api/chat", body, None, "Ollama",
@@ -92,9 +95,10 @@ class OpenAICompatLLM(LLM):
     def __init__(self, model: str, base_url: str = "http://localhost:1234/v1", api_key: str | None = None):
         self.model, self.base_url, self.api_key = model, base_url.rstrip("/"), api_key
 
-    def complete(self, system, messages, max_tokens=4000, stop=None):
+    def complete(self, system, messages, max_tokens=4000, stop=None, temperature=None):
         stop, max_tokens = self._limits(stop, max_tokens)
-        body = {"model": self.model, "max_tokens": max_tokens, "temperature": 0.2,
+        body = {"model": self.model, "max_tokens": max_tokens,
+                "temperature": 0.2 if temperature is None else temperature,
                 "messages": [{"role": "system", "content": system}] + messages}
         if stop:
             body["stop"] = stop
@@ -129,9 +133,10 @@ class FakeLLM(LLM):
         self.script = script
         self.calls: list[tuple[str, list[dict]]] = []
 
-    def complete(self, system, messages, max_tokens=4000, stop=None):
+    def complete(self, system, messages, max_tokens=4000, stop=None, temperature=None):
         self.calls.append((system, messages))
         self.stops = getattr(self, "stops", []) + [stop]
+        self.temps = getattr(self, "temps", []) + [temperature]
         if callable(self.script):
             text = self.script(system, messages)
         else:

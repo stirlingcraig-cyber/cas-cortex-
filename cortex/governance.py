@@ -102,11 +102,11 @@ class GovernedLLM(LLM):
         self.inner, self.budget, self.audit, self.kill = inner, budget, audit, kill
         self.name = f"governed:{inner.name}"
 
-    def complete(self, system, messages, max_tokens=4000) -> LLMResponse:
+    def complete(self, system, messages, max_tokens=4000, stop=None, temperature=None) -> LLMResponse:
         self.kill.check()
         self.budget.check()
         prompt_hash = hashlib.sha256((system + json.dumps(messages)).encode()).hexdigest()[:16]
-        r = self.inner.complete(system, messages, max_tokens)
+        r = self.inner.complete(system, messages, max_tokens, stop=stop, temperature=temperature)
         self.budget.charge(r.tokens)
         self.audit.write("llm_call", provider=self.inner.name, prompt_sha=prompt_hash,
                          in_tokens=r.input_tokens, out_tokens=r.output_tokens,
