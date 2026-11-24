@@ -1,6 +1,6 @@
 {
  "version": "0.9.0",
- "published_at": 1795553476,
+ "published_at": 1795554481,
  "provider": "ollama",
  "model": "qwen2.5-coder:3b",
  "stats": {
@@ -9,7 +9,7 @@
   "skills": 11,
   "lessons": 20,
   "knowledge_triples": 71,
-  "eval_runs": 5,
+  "eval_runs": 6,
   "generation": 3,
   "tokens_used": 137662
  },
@@ -84,6 +84,20 @@
    "train": null,
    "holdout": 0.0833,
    "overall": 0.0833
+  },
+  {
+   "run": "20261124-205458-5676e8",
+   "ts": 1795553848.034254,
+   "gen": 3,
+   "cells": {
+    "holdout/coding": 0.0,
+    "holdout/cyber": 0.125,
+    "holdout/bigdata": 0.5,
+    "holdout/threat": 0.3333
+   },
+   "train": null,
+   "holdout": 0.2396,
+   "overall": 0.2396
   }
  ],
  "skills": [
