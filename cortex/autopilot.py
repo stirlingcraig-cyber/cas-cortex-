@@ -8,7 +8,8 @@ Focus profile - where your attention goes, from:
 Autopilot (run by a Windows scheduled task, or "Run now"):
   1. import iPhone feedback files from iCloud Drive / OneDrive / Downloads
   2. learn up to 3 Claude-history proposals you approved
-  3. train the 2 areas you focus on most (all areas once a week)
+  3. train the 2 areas you focus on most for up to N hours (all areas once a week),
+     stopping early once everything is mastered or no progress is being made
   4. evaluate weekly (holdout = honest measure)
   5. publish to the iPhone app, if connected to GitHub
 Every step respects the kill switch and budgets; everything is logged to autopilot.log.
@@ -111,7 +112,7 @@ def _save_state(home: Path, st: dict) -> None:
 
 
 def run(home: Path, model_ready, cli_args: list[str], log=print, max_proposals: int = 3,
-        rounds: int = 1, now: float | None = None, runner=None) -> dict:
+        rounds: int = 1, now: float | None = None, runner=None, hours: float = 2.0) -> dict:
     """One autopilot pass. `runner(args) -> returncode` runs a cortex command (default: subprocess)."""
     now = now or time.time()
     home = Path(home)
@@ -133,10 +134,10 @@ def run(home: Path, model_ready, cli_args: list[str], log=print, max_proposals: 
             report["learned"].append((p["name"], rc == 0))
         weekly = now - st.get("last_full_train", 0) > 6.5 * 86400
         areas = list(DOMAINS) if weekly else focus(home)["next_training"]
-        for d in areas:
-            log(f"  training: {d}")
-            if runner(["train", "--rounds", str(rounds), "--domain", d]) == 0:
-                report["trained"].append(d)
+        log(f"  training for up to {hours:g} h: {', '.join(areas)} (stops early when mastered or stuck)")
+        if runner(["train", "--hours", f"{hours:g}", "--max-calls", str(int(150 * hours) + 50),
+                   "--domain", *areas]) == 0:
+            report["trained"] = list(areas)
         if weekly:
             st["last_full_train"] = now
         if now - st.get("last_eval", 0) > 6.5 * 86400:

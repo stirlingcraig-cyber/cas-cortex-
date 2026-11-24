@@ -172,11 +172,15 @@ def test_autopilot_pass(tmp_path, monkeypatch):
     runner = lambda args: calls.append(args) or 0
     rep = autopilot.run(home, lambda: True, [], log=quiet, runner=runner, now=1_000_000)
     assert rep["feedback_imported"] == 2 and rep["learned"] == [("count_vowels", True)]
-    assert [c[0] for c in calls].count("train") == 4 and ["eval", "--split", "holdout"] in calls   # weekly: all areas
+    train = [c for c in calls if c[0] == "train"]
+    assert len(train) == 1 and train[0][-4:] == ["coding", "cyber", "bigdata", "threat"]          # weekly: all areas
+    assert "--hours" in train[0] and ["eval", "--split", "holdout"] in calls
     assert ch.load_proposals(home)[0]["status"] == "learned"
     calls.clear()
     autopilot.run(home, lambda: True, [], log=quiet, runner=runner, now=1_000_000 + 86400)
-    assert [c[0] for c in calls].count("train") == 2 and not any(c[0] == "eval" for c in calls)  # focus areas only
+    train = [c for c in calls if c[0] == "train"]
+    assert len(train) == 1 and len(train[0][train[0].index("--domain") + 1:]) == 2                # focus areas only
+    assert not any(c[0] == "eval" for c in calls)
     calls.clear()
     rep = autopilot.run(home, lambda: False, [], log=quiet, runner=runner, now=1_000_000 + 2 * 86400)
     assert not any(c[0] in ("train", "learn-proposal") for c in calls)                         # model offline

@@ -18,26 +18,62 @@ from .evaluator.taskbank import Task
 from .memory.store import Memory
 
 
-def select_curriculum(tasks: list[Task], mem: Memory, rng: random.Random) -> list[Task]:
+PARK_AFTER = 3            # failed practice rounds in a row before a task is parked
+PARK_DAYS = 3             # parked tasks are retried after this many days
+
+
+def parked(task: Task, mem: Memory, now: float | None = None) -> bool:
+    """A task that failed its last 3 practice rounds is set aside for a few days, so training
+    time goes to tasks Cortex can currently make progress on. It comes back automatically."""
+    res = mem.recent_results(task.id, PARK_AFTER)
+    if len(res) < PARK_AFTER or any(ok for _, ok in res):
+        return False
+    return (now or time.time()) - res[0][0] < PARK_DAYS * 86400
+
+
+def select_curriculum(tasks: list[Task], mem: Memory, rng: random.Random, now: float | None = None,
+                      log=None) -> list[Task]:
     have = {s.name for s in mem.all_skills()}
     unsolved = [t for t in tasks if t.entry_point not in have]
+    resting = [t for t in unsolved if parked(t, mem, now)]
+    if resting and log:
+        log(f"  parked for now (failed {PARK_AFTER} rounds in a row, retried in {PARK_DAYS} days): "
+            + ", ".join(t.id for t in resting))
+    plan = [t for t in unsolved if t not in resting]
     mastered = [t for t in tasks if t.entry_point in have]
-    plan = list(unsolved)
     if mastered:
         plan.append(rng.choice(mastered))
     return plan
 
 
 def train(agent: CortexAgent, mem: Memory, tasks: list[Task], rounds: int, log=print,
-          seed: int | None = None) -> list[dict]:
+          seed: int | None = None, hours: float | None = None, until_mastered: bool = False,
+          plateau: int = 3, clock=time.time) -> list[dict]:
+    """Practise for `rounds` generations - or, hands-off, for up to `hours` and/or until every
+    practice task is mastered. Stops early when `plateau` generations in a row learn nothing new."""
     rng = random.Random(seed)
     train_tasks = [t for t in tasks if t.split == "train"]
     summary = []
-    for _ in range(rounds):
+    deadline = clock() + hours * 3600 if hours else None
+    hands_off = bool(hours or until_mastered)
+    # In hands-off mode `rounds` is only a cap when set above 1 (the default of 1 means "no cap").
+    limit = (rounds if rounds and rounds > 1 else 10_000) if hands_off else rounds
+    no_progress = 0
+    for _ in range(limit):
+        if deadline and clock() >= deadline:
+            log(f"\nTime budget reached ({hours:g} h) - stopping.")
+            break
         gen = mem.get_meta("generation", 0) + 1
-        plan = select_curriculum(train_tasks, mem, rng)
+        before = len(mem.all_skills())
+        plan = select_curriculum(train_tasks, mem, rng, now=clock(), log=log)
+        unsolved_left = [t for t in plan if t.entry_point not in {s.name for s in mem.all_skills()}]
+        if hands_off and not unsolved_left:
+            log("\nEvery practice task is mastered (or parked) - nothing left to learn right now.")
+            break
         log(f"\n=== generation {gen}: {len(plan)} task(s) ===")
         for t in plan:
+            if deadline and clock() >= deadline:
+                break
             log(f"  [{t.domain}] {t.id}")
             o = agent.solve(t.public_view(), mode="train")
             log(f"    -> {'SOLVED' if o.solved else 'not solved'}"
@@ -46,8 +82,14 @@ def train(agent: CortexAgent, mem: Memory, tasks: list[Task], rounds: int, log=p
             if o.lesson:
                 log(f"    lesson: {o.lesson[:160]}")
             summary.append({"generation": gen, "task": t.id, "solved": o.solved,
-                            "attempts": o.attempts, "tokens": o.tokens})
+                            "attempts": o.attempts, "tokens": o.tokens, "seconds": round(o.duration, 1)})
         mem.set_meta("generation", gen)
+        if hands_off:
+            no_progress = 0 if len(mem.all_skills()) > before else no_progress + 1
+            if no_progress >= plateau:
+                log(f"\nNo new skills for {plateau} generations - stopping (the remaining tasks need a "
+                    "bigger model, a lesson, or more time).")
+                break
     return summary
 
 

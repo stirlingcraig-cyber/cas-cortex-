@@ -93,6 +93,16 @@ Training stays on the PC because it needs the local AI model. To send results to
 
 Only learning data is published. **Alerts and log contents are never published**, because the repo is public.
 
+## Fast, hands-off training
+
+* **Train tab → How long: For 2 hours / Until mastered**, tick *Evaluate* (and *Publish to iPhone*), and walk away.
+  The command line is `.\cortex train --hours 2 --then-eval --then-publish`.
+* It stops when time's up, when everything is mastered, or when 3 rounds teach it nothing new. Tasks failing 3 rounds
+  in a row are parked for 3 days.
+* Faster per task: it stops at the end of the code, caps answer length, keeps only the latest attempt when retrying,
+  stops retrying the same mistake, fixes forgotten imports itself, and reflects only when there's something to learn.
+* **Setup → Speed test** (`.\cortex doctor --speed`) shows your model's real speed and whether the GPU is used.
+
 ## Learning from you
 
 Cortex keeps learning from how you use it (Desktop app → **Learn from You** tab):

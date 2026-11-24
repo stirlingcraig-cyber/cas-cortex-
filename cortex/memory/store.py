@@ -92,6 +92,12 @@ class Memory:
                                    (task_id, limit)).fetchall()
         return self.db.execute("SELECT * FROM episodes ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
 
+    def recent_results(self, task_id: str, n: int = 3) -> list[tuple[float, bool]]:
+        """(time, solved) of the latest practice episodes for a task, newest first."""
+        rows = self.db.execute("""SELECT ts, solved FROM episodes WHERE task_id=? AND mode='train'
+                                  ORDER BY id DESC LIMIT ?""", (task_id, n)).fetchall()
+        return [(r["ts"], bool(r["solved"])) for r in rows]
+
     def past_reflections(self, task_id: str, n: int = 2) -> list[str]:
         rows = self.db.execute("""SELECT reflection FROM episodes WHERE task_id=? AND reflection != ''
                                   ORDER BY id DESC LIMIT ?""", (task_id, n)).fetchall()

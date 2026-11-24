@@ -15,6 +15,7 @@ class LLMResponse:
     text: str
     input_tokens: int = 0
     output_tokens: int = 0
+    seconds: float = 0.0          # generation time reported by the model server, if known
 
     @property
     def tokens(self) -> int:
@@ -23,8 +24,20 @@ class LLMResponse:
 
 class LLM:
     name = "base"
+    # Speed settings applied to every call (set by make_llm). Stopping at the closing code
+    # fence skips the explanation small models like to add after the code; the output cap
+    # stops runaway answers. Neither affects answers that are already shorter.
+    default_stop: list[str] | None = None
+    max_tokens_cap: int | None = None
 
-    def complete(self, system: str, messages: list[dict], max_tokens: int = 4000) -> LLMResponse:
+    def _limits(self, stop, max_tokens):
+        stop = stop or self.default_stop
+        if self.max_tokens_cap:
+            max_tokens = min(max_tokens, self.max_tokens_cap)
+        return stop, max_tokens
+
+    def complete(self, system: str, messages: list[dict], max_tokens: int = 4000,
+                 stop: list[str] | None = None) -> LLMResponse:
         raise NotImplementedError
 
 
@@ -39,9 +52,11 @@ class AnthropicLLM(LLM):
         self.client = anthropic.Anthropic()  # reads ANTHROPIC_API_KEY
         self.model = model
 
-    def complete(self, system, messages, max_tokens=4000):
+    def complete(self, system, messages, max_tokens=4000, stop=None):
+        stop, max_tokens = self._limits(stop, max_tokens)
+        kw = {"stop_sequences": stop} if stop else {}
         r = self.client.messages.create(model=self.model, max_tokens=max_tokens,
-                                        system=system, messages=messages)
+                                        system=system, messages=messages, **kw)
         text = "".join(getattr(b, "text", "") for b in r.content)
         return LLMResponse(text, r.usage.input_tokens, r.usage.output_tokens)
 
@@ -52,11 +67,13 @@ class OllamaLLM(LLM):
     def __init__(self, model: str, url: str = "http://localhost:11434", num_ctx: int = 16384):
         self.model, self.url, self.num_ctx = model, url.rstrip("/"), num_ctx
 
-    def complete(self, system, messages, max_tokens=4000):
+    def complete(self, system, messages, max_tokens=4000, stop=None):
+        stop, max_tokens = self._limits(stop, max_tokens)
         # Ollama's default context window is small and silently truncates long prompts,
         # which would cut off the skills and lessons Cortex relies on - so set it explicitly.
         body = {"model": self.model, "stream": False, "keep_alive": "30m",
-                "options": {"num_predict": max_tokens, "num_ctx": self.num_ctx, "temperature": 0.2},
+                "options": {"num_predict": max_tokens, "num_ctx": self.num_ctx, "temperature": 0.2,
+                            **({"stop": stop} if stop else {})},
                 "messages": [{"role": "system", "content": system}] + messages}
         d = _post_json(self.url + "/api/chat", body, None, "Ollama",
                        "Start the Ollama app (or run `ollama serve`), then try again. "
@@ -64,7 +81,7 @@ class OllamaLLM(LLM):
         if "error" in d:
             raise RuntimeError(f"Ollama: {d['error']} - try `ollama pull {self.model}`")
         return LLMResponse(d["message"]["content"], d.get("prompt_eval_count", 0),
-                           d.get("eval_count", 0))
+                           d.get("eval_count", 0), d.get("total_duration", 0) / 1e9)
 
 
 class OpenAICompatLLM(LLM):
@@ -75,9 +92,12 @@ class OpenAICompatLLM(LLM):
     def __init__(self, model: str, base_url: str = "http://localhost:1234/v1", api_key: str | None = None):
         self.model, self.base_url, self.api_key = model, base_url.rstrip("/"), api_key
 
-    def complete(self, system, messages, max_tokens=4000):
+    def complete(self, system, messages, max_tokens=4000, stop=None):
+        stop, max_tokens = self._limits(stop, max_tokens)
         body = {"model": self.model, "max_tokens": max_tokens, "temperature": 0.2,
                 "messages": [{"role": "system", "content": system}] + messages}
+        if stop:
+            body["stop"] = stop
         headers = {"Authorization": f"Bearer {self.api_key}"} if self.api_key else None
         d = _post_json(self.base_url + "/chat/completions", body, headers, "the local model server",
                        f"Cortex is set to use LM Studio (provider 'openai'). Either start LM Studio's local server with a "
@@ -109,8 +129,9 @@ class FakeLLM(LLM):
         self.script = script
         self.calls: list[tuple[str, list[dict]]] = []
 
-    def complete(self, system, messages, max_tokens=4000):
+    def complete(self, system, messages, max_tokens=4000, stop=None):
         self.calls.append((system, messages))
+        self.stops = getattr(self, "stops", []) + [stop]
         if callable(self.script):
             text = self.script(system, messages)
         else:
@@ -118,14 +139,22 @@ class FakeLLM(LLM):
         return LLMResponse(text, 100, 50)
 
 
+CODE_STOP = ["\n```\n", "\n```\r\n"]
+
+
 def make_llm(cfg) -> LLM:
     if cfg.provider == "anthropic":
-        return AnthropicLLM(cfg.model)
-    if cfg.provider == "ollama":
-        return OllamaLLM(cfg.model, cfg.ollama_url, cfg.num_ctx)
-    if cfg.provider == "openai":
-        return OpenAICompatLLM(cfg.model, cfg.openai_base_url, cfg.openai_api_key)
-    raise ValueError(cfg.provider)
+        llm = AnthropicLLM(cfg.model)
+    elif cfg.provider == "ollama":
+        llm = OllamaLLM(cfg.model, cfg.ollama_url, cfg.num_ctx)
+    elif cfg.provider == "openai":
+        llm = OpenAICompatLLM(cfg.model, cfg.openai_base_url, cfg.openai_api_key)
+    else:
+        raise ValueError(cfg.provider)
+    if getattr(cfg, "fast", True):
+        llm.default_stop = CODE_STOP
+        llm.max_tokens_cap = getattr(cfg, "max_output_tokens", 1800)
+    return llm
 
 
 _CODE = re.compile(r"```[ \t]*(?:python3?|py)?[ \t]*\r?\n(.*?)```", re.S | re.I)
@@ -142,6 +171,9 @@ def extract_code(text: str) -> str:
     blocks = _CODE.findall(text or "")
     if blocks:
         return max(blocks, key=len).strip() + "\n"
+    m = re.search(r"```[ \t]*(?:python3?|py)?[ \t]*\r?\n(.*)$", text or "", re.S | re.I)
+    if m:                                   # opening fence but no closing one
+        return m.group(1).strip().rstrip("`").strip() + "\n"
     return (text or "").strip() + "\n"
 
 

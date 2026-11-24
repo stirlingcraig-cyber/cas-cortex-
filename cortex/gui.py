@@ -442,11 +442,13 @@ class CortexApp(tk.Tk):
                                                  done=lambda rc: self._check_ollama(), label="Downloading model..."))
         b3 = ttk.Button(row, text="Install Ollama", command=self._install_ollama)
         b4 = ttk.Button(row, text="Ollama website", command=lambda: webbrowser.open("https://ollama.com/download"))
+        b6 = ttk.Button(row, text="Speed test",
+                        command=lambda: self.run("speed", ["doctor", "--speed"], self.setup_con, label="Measuring model speed..."))
         b5 = ttk.Button(row, text="Test the sandbox",
                         command=lambda: self.run("sandbox", ["check-sandbox"], self.setup_con, label="Testing sandbox..."))
-        for b in (b1, b2, b5, b3, b4):
+        for b in (b1, b2, b6, b5, b3, b4):
             b.pack(side="left", padx=(0, 8))
-        self._reg([b1, b2, b3, b5])
+        self._reg([b1, b2, b3, b5, b6])
 
         lf = ttk.LabelFrame(p, text="Model choice", padding=10)
         lf.pack(fill="x", pady=12)
@@ -515,7 +517,8 @@ class CortexApp(tk.Tk):
     def build_train(self):
         p = self.pages["Train"]
         ttk.Label(p, text="Steps 2 & 4 - Practise and learn", style="H1.TLabel").pack(anchor="w")
-        ttk.Label(p, text="Each round (generation) works through tasks it hasn't mastered yet, plus one revision task. "
+        ttk.Label(p, text="Pick 'For 2 hours' or 'Until mastered' and walk away: Cortex works through tasks it hasn't "
+                          "mastered, skips ones it keeps failing, stops when it's done or stuck, then evaluates. "
                           "Everything it learns is saved as it goes, so stopping is always safe.",
                   style="Muted.TLabel", wraplength=1050).pack(anchor="w", pady=(2, 10))
         top = ttk.Frame(p, style="Page.TFrame"); top.pack(fill="x")
@@ -535,7 +538,21 @@ class CortexApp(tk.Tk):
         ttk.Label(lf, text="Max model calls").grid(row=1, column=2, sticky="w", padx=(10, 0), pady=(8, 0))
         self.max_calls = tk.IntVar(value=300)
         ttk.Spinbox(lf, from_=10, to=5000, increment=50, textvariable=self.max_calls, width=8).grid(row=1, column=3, sticky="w", padx=6, pady=(8, 0))
-        bt = ttk.Frame(lf, style="Page.TFrame"); bt.grid(row=2, column=0, columnspan=4, sticky="w", pady=(10, 0))
+        mode = ttk.Frame(lf, style="Page.TFrame"); mode.grid(row=2, column=0, columnspan=4, sticky="w", pady=(10, 0))
+        ttk.Label(mode, text="How long").pack(side="left", padx=(0, 8))
+        self.train_mode = tk.StringVar(value="hours")
+        ttk.Radiobutton(mode, text="Rounds", value="rounds", variable=self.train_mode).pack(side="left")
+        ttk.Radiobutton(mode, text="For", value="hours", variable=self.train_mode).pack(side="left", padx=(10, 2))
+        self.train_hours = tk.DoubleVar(value=2.0)
+        ttk.Spinbox(mode, from_=0.5, to=12, increment=0.5, textvariable=self.train_hours, width=4).pack(side="left")
+        ttk.Label(mode, text="hours").pack(side="left", padx=(2, 10))
+        ttk.Radiobutton(mode, text="Until mastered", value="mastered", variable=self.train_mode).pack(side="left")
+        after = ttk.Frame(lf, style="Page.TFrame"); after.grid(row=3, column=0, columnspan=4, sticky="w", pady=(6, 0))
+        ttk.Label(after, text="When finished").pack(side="left", padx=(0, 8))
+        self.then_eval, self.then_pub = tk.BooleanVar(value=True), tk.BooleanVar(value=False)
+        ttk.Checkbutton(after, text="Evaluate (holdout)", variable=self.then_eval).pack(side="left")
+        ttk.Checkbutton(after, text="Publish to iPhone", variable=self.then_pub).pack(side="left", padx=10)
+        bt = ttk.Frame(lf, style="Page.TFrame"); bt.grid(row=4, column=0, columnspan=4, sticky="w", pady=(10, 0))
         start = ttk.Button(bt, text="Start training", style="Accent.TButton", command=self._start_train)
         stop = ttk.Button(bt, text="Stop", style="Danger.TButton", command=lambda: (self.stop("train"), self.stop("solve")), state="disabled")
         start.pack(side="left"); stop.pack(side="left", padx=8)
@@ -567,8 +584,19 @@ class CortexApp(tk.Tk):
             pass
 
     def _start_train(self):
-        args = ["train", "--rounds", str(self.rounds.get()), "--attempts", str(self.attempts.get()),
-                "--max-calls", str(self.max_calls.get())]
+        args = ["train", "--attempts", str(self.attempts.get())]
+        m = self.train_mode.get()
+        if m == "rounds":
+            args += ["--rounds", str(self.rounds.get()), "--max-calls", str(self.max_calls.get())]
+        elif m == "hours":
+            h = float(self.train_hours.get())
+            args += ["--hours", f"{h:g}", "--max-calls", str(max(self.max_calls.get(), int(150 * h) + 50))]
+        else:
+            args += ["--until-mastered", "--max-calls", str(max(self.max_calls.get(), 1500))]
+        if self.then_eval.get():
+            args.append("--then-eval")
+        if self.then_pub.get():
+            args.append("--then-publish")
         d = DOMAIN_LABELS[self.train_dom.get()]
         if d:
             args += ["--domain", d]
@@ -583,6 +611,8 @@ class CortexApp(tk.Tk):
             return
         if line.startswith("=== generation"):
             st["gen"] = line.strip("= ")
+        if line.startswith("Time budget reached") or line.startswith("Every practice task") or line.startswith("No new skills"):
+            st["gen"] = line.split(" - ")[0]
         if line.strip().startswith("-> "):
             st["done"] += 1
             st["solved"] += "SOLVED" in line

@@ -31,7 +31,8 @@ software engineering, defensive cyber security, big-data processing and real-tim
 risk and harm analysis. You write correct, efficient, standard-library Python 3.10+.
 
 Rules:
-- Reply with exactly one ```python code block containing the complete module.
+- Reply with exactly one ```python code block containing the complete module, and nothing
+  else: no explanation before or after it.
 - The module must only define things: no example usage, print() calls, asserts, tests or
   `if __name__ == "__main__":` block.
 - Allowed imports only: {", ".join(sorted(m for m in ALLOWED_MODULES if m not in ("skills", "__future__")))}.
@@ -155,13 +156,15 @@ class Outcome:
 class CortexAgent:
     def __init__(self, llm: LLM, memory: Memory, audit: AuditLog, max_attempts: int = 4,
                  sandbox_timeout: float = 15.0, memory_mb: int = 768, learn: bool = True,
-                 log=print, max_skills: int = 4):
+                 log=print, max_skills: int = 4, reflect: str = "smart", stuck_after: int = 2):
         self.llm, self.mem, self.audit = llm, memory, audit
         self.max_attempts = max_attempts
         self.timeout, self.memory_mb = sandbox_timeout, memory_mb
         self.learn = learn and not memory.read_only
         self.log = log
         self.max_skills = max_skills
+        self.reflect_mode = reflect          # "always" | "smart" | "never"
+        self.stuck_after = stuck_after
 
     # ------------------------------------------------------------ prompting
     def _context(self, task: TaskView) -> tuple[str, list[str], dict[str, str]]:
@@ -212,13 +215,17 @@ class CortexAgent:
         t0 = time.time()
         prompt, _, _ = self._context(task)
         skill_code = self.mem.skill_code_map()
-        messages = [{"role": "user", "content": prompt}]
+        first = {"role": "user", "content": prompt}
+        messages = [first]
         tokens, code, best_code, best_rate = 0, "", "", -1.0
         history: list[str] = []
         attempts = 0
         result = None
+        seen_code: set[str] = set()
+        same_reason, last_reason = 0, None
+        stopped_early = ""
         for attempts in range(1, self.max_attempts + 1):
-            r = self.llm.complete(SYSTEM, messages, max_tokens=4000)
+            r = self.llm.complete(SYSTEM, messages, max_tokens=1800)
             tokens += r.tokens
             code = clean_solution(extract_code(r.text))
             result = run_tests(code, task.visible_tests, skills=skill_code,
@@ -236,10 +243,26 @@ class CortexAgent:
                 best_rate, best_code = result.pass_rate, code
             if result.all_passed:
                 break
-            messages += [{"role": "assistant", "content": r.text},
-                         {"role": "user", "content":
-                          "Your solution did not pass:\n\n" + result.failure_report() +
-                          "\n\nDiagnose the root cause, then return the complete corrected module."}]
+            # Stuck detection: a small model that repeats itself won't succeed on attempt 8 -
+            # stop and let the next generation try again with the lesson from this one.
+            norm = "\n".join(l.rstrip() for l in code.strip().splitlines())
+            same_reason = same_reason + 1 if why and why == last_reason else 1
+            last_reason = why
+            if norm in seen_code:
+                stopped_early = "it wrote the same code again"
+            elif self.stuck_after and same_reason > self.stuck_after:
+                stopped_early = f"the same mistake {same_reason} times in a row"
+            if stopped_early:
+                self.log(f"    stopping early: {stopped_early} (saves time - it will retry next round)")
+                break
+            seen_code.add(norm)
+            # Keep only the latest attempt in the conversation: shorter prompts are much faster
+            # on a local model, and stop the context window overflowing on long retries.
+            messages = [first,
+                        {"role": "assistant", "content": f"```python\n{code.strip()}\n```"},
+                        {"role": "user", "content":
+                         f"Attempt {attempts} did not pass:\n\n" + result.failure_report() +
+                         "\n\nDiagnose the root cause, then return the complete corrected module."}]
         solved = bool(result and result.all_passed)
         final = code if solved else best_code
         used = skills_used(final)
@@ -259,8 +282,9 @@ class CortexAgent:
                     name=task.entry_point, domain=task.domain,
                     description=f"{task.title}. " + task.prompt.split("\n")[0][:300],
                     code=final, tests=list(task.visible_tests), trust=trust)
-            out.lesson, rtoks = self._reflect(task, out, result)
-            out.tokens += rtoks
+            if self._should_reflect(task, out):
+                out.lesson, rtoks = self._reflect(task, out, result)
+                out.tokens += rtoks
         out.duration = time.time() - t0
         if self.learn:
             self.mem.log_episode(task_id=task.id, domain=task.domain, mode=mode,
@@ -271,6 +295,15 @@ class CortexAgent:
         self.audit.write("episode", task=task.id, mode=mode, solved=solved,
                          attempts=out.attempts, skill_action=out.skill_action, learn=self.learn)
         return out
+
+    def _should_reflect(self, task: TaskView, out: Outcome) -> bool:
+        """Reflection costs a whole model call. In 'smart' mode Cortex only reflects when there
+        is something to learn: it struggled or failed, or it solved this task for the first time."""
+        if self.reflect_mode == "never":
+            return False
+        if self.reflect_mode == "always" or not out.solved or out.attempts > 1:
+            return True
+        return out.skill_action == "added"
 
     def _reflect(self, task: TaskView, out: Outcome, last) -> tuple[str, int]:
         summary = (f"Task: {task.title} ({task.domain})\n{task.prompt}\n\n"

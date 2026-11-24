@@ -43,7 +43,8 @@ class Runtime:
         return CortexAgent(self.llm, mem, self.audit, max_attempts=self.cfg.max_attempts,
                            sandbox_timeout=self.cfg.sandbox_timeout,
                            memory_mb=self.cfg.sandbox_memory_mb, learn=learn,
-                           max_skills=3 if self.cfg.local else 4)
+                           max_skills=3 if self.cfg.local else 4, reflect=self.cfg.reflect,
+                           stuck_after=self.cfg.stuck_after)
 
     def tasks(self, domain=None):
         ts = all_tasks(self.cfg.tasks_dir)
@@ -73,7 +74,11 @@ def cmd_status(rt, a):
 
 
 def cmd_doctor(rt, a):
-    from .doctor import run_doctor
+    from .doctor import run_doctor, speed_test
+    if a.speed:
+        if speed_test(rt.cfg) is None:
+            sys.exit(1)
+        return
     if not run_doctor(rt.cfg, pull=a.pull):
         sys.exit(1)
 
@@ -233,7 +238,7 @@ def cmd_autopilot(rt, a):
         return online and has
     rt.kill.check()
     rt.audit.write("autopilot_start")
-    rep = autopilot.run(rt.cfg.home, ready, ["--home", str(rt.cfg.home)], log=log, rounds=a.rounds)
+    rep = autopilot.run(rt.cfg.home, ready, ["--home", str(rt.cfg.home)], log=log, rounds=a.rounds, hours=a.hours)
     rt.audit.write("autopilot_end", trained=rep["trained"], learned=len(rep["learned"]),
                    feedback=rep["feedback_imported"], published=rep["published"])
 
@@ -249,18 +254,34 @@ def cmd_tasks(rt, a):
 
 
 def cmd_train(rt, a):
-    from .trainer import train
+    from .trainer import report, run_eval, train
     mem = rt.memory()
-    rt.audit.write("train_start", rounds=a.rounds, domain=a.domain)
-    tasks = rt.tasks(a.domain)
+    domains = a.domain or []
+    rt.audit.write("train_start", rounds=a.rounds, domain=domains, hours=a.hours, until_mastered=a.until_mastered)
+    tasks = [t for t in rt.tasks() if not domains or t.domain in domains]
+    t0 = time.time()
     try:
-        res = train(rt.agent(mem), mem, tasks, a.rounds, seed=a.seed)
+        res = train(rt.agent(mem), mem, tasks, a.rounds, seed=a.seed, hours=a.hours,
+                    until_mastered=a.until_mastered)
     finally:
         rt.audit.write("train_end", calls=rt.budget.calls, tokens=rt.budget.tokens)
     solved = sum(r["solved"] for r in res)
-    print(f"\n{solved}/{len(res)} practice episodes solved. "
+    mins = (time.time() - t0) / 60
+    print(f"\n{solved}/{len(res)} practice episodes solved in {mins:.0f} min. "
           f"Model calls {rt.budget.calls}, tokens {rt.budget.tokens:,}.")
+    if res:
+        print(f"Average {sum(r['seconds'] for r in res) / len(res):.0f} s per task.")
     print("Skills in library: " + (", ".join(s.name for s in mem.all_skills()) or "none"))
+    if a.then_eval:
+        print("\n=== evaluation (holdout) ===")
+        rt.ensure_integrity()
+        ro = rt.memory(read_only=True)
+        run_eval(rt.agent(ro, learn=False), ro, rt.tasks(), split="holdout")
+        print(report(ro))
+    if a.then_publish:
+        from .publish import publish
+        print("\n=== publish ===")
+        publish(rt.cfg.home)
 
 
 def cmd_eval(rt, a):
@@ -460,13 +481,21 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("focus", help="what Cortex has learned about your focus")
     s = sub.add_parser("autopilot", help="one pass of continuous learning (used by the nightly task)")
     s.add_argument("--rounds", type=int, default=1)
+    s.add_argument("--hours", type=float, default=2.0, help="training time budget per night (default 2)")
     s.add_argument("--max-calls", type=int)
     sub.add_parser("check-sandbox", help="test that agent code can run on this PC (no AI needed)")
     s = sub.add_parser("doctor", help="check setup, choose a local model for your PC, download it")
     s.add_argument("--pull", action="store_true", help="download the model if missing")
+    s.add_argument("--speed", action="store_true", help="measure how fast the model runs on this PC")
     s = sub.add_parser("tasks", help="list curriculum tasks"); s.add_argument("--domain", choices=DOMAINS)
     s = sub.add_parser("train", help="practise and learn")
-    s.add_argument("--rounds", type=int, default=1); s.add_argument("--domain", choices=DOMAINS)
+    s.add_argument("--rounds", type=int, default=1)
+    s.add_argument("--domain", choices=DOMAINS, nargs="+", help="one or more areas (default: all)")
+    s.add_argument("--hours", type=float, help="hands-off: keep training for up to this long")
+    s.add_argument("--until-mastered", action="store_true",
+                   help="hands-off: keep going until every practice task is mastered (stops if stuck)")
+    s.add_argument("--then-eval", action="store_true", help="run the holdout evaluation when finished")
+    s.add_argument("--then-publish", action="store_true", help="publish to the iPhone app when finished")
     s.add_argument("--attempts", type=int); s.add_argument("--max-calls", type=int)
     s.add_argument("--seed", type=int)
     s = sub.add_parser("eval", help="score with hidden tests (memory read-only)")

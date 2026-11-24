@@ -30,7 +30,11 @@ class Config:
     ollama_url: str = "http://localhost:11434"
     openai_base_url: str = "http://localhost:1234/v1"
     openai_api_key: str | None = None
-    num_ctx: int = 16384
+    num_ctx: int = 8192               # 8k fits every Cortex prompt; bigger only costs RAM and speed
+    fast: bool = True                 # stop at the end of the code, cap answer length
+    max_output_tokens: int = 1800
+    reflect: str = "smart"            # smart = only reflect when there's something to learn
+    stuck_after: int = 2              # stop retrying when the same mistake repeats this often
     max_attempts: int = 4              # code attempts per task
     max_llm_calls: int = 300           # per command run
     max_tokens_per_run: int = 5_000_000
@@ -84,4 +88,7 @@ def load_config(home: str | Path | None = None, provider: str | None = None,
                   openai_base_url=os.environ.get("OPENAI_BASE_URL",
                                                  saved.get("openai_base_url", "http://localhost:1234/v1")),
                   openai_api_key=os.environ.get("OPENAI_API_KEY") or None,
-                  num_ctx=int(saved.get("num_ctx", 16384)))
+                  num_ctx=int(saved.get("num_ctx", 8192)),
+                  fast=bool(saved.get("fast", True)),
+                  max_output_tokens=int(saved.get("max_output_tokens", 1800)),
+                  reflect=str(saved.get("reflect", "smart")))
