@@ -93,6 +93,17 @@ Training stays on the PC because it needs the local AI model. To send results to
 
 Only learning data is published. **Alerts and log contents are never published**, because the repo is public.
 
+## Step 3 — gated self-improvement
+
+Cortex proposes changes to **its own method** — the settings and a short prompt addendum it uses to solve tasks
+(`tuning.json`, never the program code). Each candidate is scored against the **hidden evaluator** on held-out tasks,
+in isolation with memory read-only, and only a change that beats the current method by a clear margin is proposed.
+**You approve or reject each one** (Self-Improve tab, or `.\cortex improve` / `improvements --approve <id>`).
+
+The evaluator, task bank, sandbox, governance layer and the fixed safety prompt are integrity-locked and can never be
+changed this way; a proposed prompt addition is length- and content-checked and only ever *added* to the safety
+prompt. The nightly autopilot proposes weekly but never applies on its own. Every decision is audited.
+
 ## Learns from its mistakes until it solves
 
 When Cortex can't solve a task first time, it records each failed approach and the error it hit, then feeds those

@@ -156,7 +156,8 @@ class Outcome:
 class CortexAgent:
     def __init__(self, llm: LLM, memory: Memory, audit: AuditLog, max_attempts: int = 4,
                  sandbox_timeout: float = 15.0, memory_mb: int = 768, learn: bool = True,
-                 log=print, max_skills: int = 4, reflect: str = "smart", stuck_after: int = 2):
+                 log=print, max_skills: int = 4, reflect: str = "smart", stuck_after: int = 2,
+                 system_addendum: str = ""):
         self.llm, self.mem, self.audit = llm, memory, audit
         self.max_attempts = max_attempts
         self.timeout, self.memory_mb = sandbox_timeout, memory_mb
@@ -165,6 +166,9 @@ class CortexAgent:
         self.max_skills = max_skills
         self.reflect_mode = reflect          # "always" | "smart" | "never"
         self.stuck_after = stuck_after
+        # The fixed SYSTEM (with the safety rules) is ALWAYS the base; self-improvement may only
+        # append a short addendum, never remove or edit the core instructions.
+        self.system = SYSTEM + (("\n\n" + system_addendum.strip()) if system_addendum.strip() else "")
 
     # ------------------------------------------------------------ prompting
     def _context(self, task: TaskView) -> tuple[str, list[str], dict[str, str]]:
@@ -250,10 +254,10 @@ class CortexAgent:
                 temperature = 0.5
             else:
                 temperature = 0.85
-            sys_prompt = SYSTEM
+            sys_prompt = self.system
             if temperature >= 0.85 and (seen_code or same_reason > 1 or diversified):
-                sys_prompt = SYSTEM + ("\n\nIMPORTANT: your previous approach is not working. Start over with a "
-                                       "fundamentally different algorithm or structure - do not tweak the last attempt.")
+                sys_prompt = self.system + ("\n\nIMPORTANT: your previous approach is not working. Start over with a "
+                                            "fundamentally different algorithm or structure - do not tweak the last attempt.")
             r = self.llm.complete(sys_prompt, messages, max_tokens=1800, temperature=temperature)
             tokens += r.tokens
             code = clean_solution(extract_code(r.text))

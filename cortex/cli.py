@@ -40,11 +40,14 @@ class Runtime:
 
     def agent(self, mem: Memory, learn=True):
         from .agent import CortexAgent
-        return CortexAgent(self.llm, mem, self.audit, max_attempts=self.cfg.max_attempts,
-                           sandbox_timeout=self.cfg.sandbox_timeout,
-                           memory_mb=self.cfg.sandbox_memory_mb, learn=learn,
-                           max_skills=3 if self.cfg.local else 4, reflect=self.cfg.reflect,
-                           stuck_after=self.cfg.stuck_after)
+        from .tuning import load as load_tuning
+        # Self-improvement's approved settings, if any, override the defaults. Falls back to the
+        # built-in defaults when nothing has been tuned.
+        kw = {"max_skills": 3 if self.cfg.local else 4, "max_attempts": self.cfg.max_attempts,
+              "reflect": self.cfg.reflect, "stuck_after": self.cfg.stuck_after, "system_addendum": ""}
+        kw.update(load_tuning(self.cfg.home).agent_kwargs())
+        return CortexAgent(self.llm, mem, self.audit, sandbox_timeout=self.cfg.sandbox_timeout,
+                           memory_mb=self.cfg.sandbox_memory_mb, learn=learn, **kw)
 
     def tasks(self, domain=None):
         ts = all_tasks(self.cfg.tasks_dir)
@@ -241,6 +244,55 @@ def cmd_autopilot(rt, a):
     rep = autopilot.run(rt.cfg.home, ready, ["--home", str(rt.cfg.home)], log=log, rounds=a.rounds, hours=a.hours)
     rt.audit.write("autopilot_end", trained=rep["trained"], learned=len(rep["learned"]),
                    feedback=rep["feedback_imported"], published=rep["published"])
+
+
+def cmd_improve(rt, a):
+    from . import improve
+    rt.ensure_integrity()
+    tasks = rt.tasks()
+    rt.audit.write("self_improvement_start", split=a.split)
+    res = improve.propose(rt.cfg, rt.llm, tasks, max_candidates=a.candidates, split=a.split,
+                          sample=a.sample)
+    rt.audit.write("self_improvement_end", baseline=res["baseline"], queued=bool(res["queued"]))
+
+
+def cmd_improvements(rt, a):
+    from . import improve
+    if a.approve:
+        for pid in a.approve:
+            try:
+                p = improve.apply(rt.cfg.home, pid, rt.audit)
+                print(f"Applied {pid}: {p['rationale']} (now Cortex's active method).")
+            except (KeyError, ValueError) as e:
+                print(f"{pid}: {e}")
+        return
+    if a.reject:
+        for pid in a.reject:
+            try:
+                improve.reject(rt.cfg.home, pid, rt.audit)
+                print(f"Rejected {pid}.")
+            except KeyError as e:
+                print(f"{pid}: no such proposal")
+        return
+    props = improve.load_proposals(rt.cfg.home)
+    if not props:
+        print("No self-improvement proposals yet. Run: cortex improve")
+    for p in props:
+        if p["status"] != "rejected" or a.all:
+            print(f"{p['id']}  {p['status']:<9} {p['baseline_score']:.0%} -> {p['candidate_score']:.0%}  {p['rationale']}")
+
+
+def cmd_tuning(rt, a):
+    from . import tuning
+    if a.reset:
+        tuning.reset(rt.cfg.home)
+        rt.audit.write("tuning_reset")
+        print("Method reset to the built-in defaults.")
+        return
+    t = tuning.load(rt.cfg.home).describe()
+    print("Cortex's current method (what self-improvement can change):")
+    for k, v in t.items():
+        print(f"  {k}: {v!r}" if k != "system_addendum" else f"  {k}: {v or '(none)'}")
 
 
 def cmd_gui(rt, a):
@@ -465,6 +517,16 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("gui", help="open the desktop app")
     s = sub.add_parser("publish", help="publish progress to GitHub for the iPhone app")
     s.add_argument("--no-push", action="store_true", help="only write docs/data/status.json")
+    s = sub.add_parser("improve", help="step 3: propose and test improvements to Cortex's own method")
+    s.add_argument("--candidates", type=int, default=3, help="how many changes to try")
+    s.add_argument("--split", choices=["holdout", "train", "all"], default="holdout")
+    s.add_argument("--sample", type=int, help="only score this many tasks (faster)")
+    s.add_argument("--max-calls", type=int)
+    s = sub.add_parser("improvements", help="review self-improvement proposals")
+    s.add_argument("--approve", nargs="+", metavar="ID"); s.add_argument("--reject", nargs="+", metavar="ID")
+    s.add_argument("--all", action="store_true")
+    s = sub.add_parser("tuning", help="show Cortex's current method, or reset it")
+    s.add_argument("--reset", action="store_true")
     s = sub.add_parser("add-pack", help="add a ready-made task pack, e.g. automotive")
     s.add_argument("pack", help="pack name (automotive) or path to a pack .json")
     s = sub.add_parser("import-claude", help="learn from your Claude data export (processed locally)")
@@ -531,7 +593,8 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
-COMMANDS = {"status": cmd_status, "doctor": cmd_doctor, "gui": cmd_gui, "check-sandbox": cmd_check_sandbox, "publish": cmd_publish, "add-pack": cmd_add_pack, "import-claude": cmd_import_claude,
+COMMANDS = {"status": cmd_status, "doctor": cmd_doctor, "gui": cmd_gui, "check-sandbox": cmd_check_sandbox, "publish": cmd_publish,
+            "improve": cmd_improve, "improvements": cmd_improvements, "tuning": cmd_tuning, "add-pack": cmd_add_pack, "import-claude": cmd_import_claude,
             "proposals": cmd_proposals, "learn-proposal": cmd_learn_proposal, "feedback": cmd_feedback,
             "focus": cmd_focus, "autopilot": cmd_autopilot, "tasks": cmd_tasks, "train": cmd_train, "eval": cmd_eval,
             "solve": cmd_solve, "learn": cmd_learn, "skills": cmd_skills, "memory": cmd_memory,

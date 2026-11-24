@@ -11,7 +11,8 @@ Autopilot (run by a Windows scheduled task, or "Run now"):
   3. train the 2 areas you focus on most for up to N hours (all areas once a week),
      stopping early once everything is mastered or no progress is being made
   4. evaluate weekly (holdout = honest measure)
-  5. publish to the iPhone app, if connected to GitHub
+  5. once a week, propose and test improvements to its own method (you approve any change)
+  6. publish to the iPhone app, if connected to GitHub
 Every step respects the kill switch and budgets; everything is logged to autopilot.log.
 """
 from __future__ import annotations
@@ -119,7 +120,7 @@ def run(home: Path, model_ready, cli_args: list[str], log=print, max_proposals: 
     st = _state(home)
     runner = runner or (lambda args: subprocess.run([sys.executable, "-m", "cortex", *cli_args, *args]).returncode)
     report = {"started": now, "feedback_imported": 0, "learned": [], "trained": [], "evaluated": False,
-              "published": False}
+              "improved": False, "published": False}
     log("== CAS Cortex autopilot ==")
     report["feedback_imported"] = import_inbox(home, log=log)
     ready = model_ready()
@@ -145,6 +146,11 @@ def run(home: Path, model_ready, cli_args: list[str], log=print, max_proposals: 
             report["evaluated"] = runner(["eval", "--split", "holdout"]) == 0
             if report["evaluated"]:
                 st["last_eval"] = now
+        if now - st.get("last_improve", 0) > 6.5 * 86400:
+            log("  weekly self-improvement check (proposes only - you approve any change)")
+            report["improved"] = runner(["improve", "--candidates", "3"]) == 0
+            if report["improved"]:
+                st["last_improve"] = now
     from .publish import git_ready
     if git_ready() is None:
         report["published"] = runner(["publish"]) == 0

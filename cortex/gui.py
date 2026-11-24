@@ -27,7 +27,7 @@ DOMAIN_LABELS = {"All areas": None, "Coding": "coding", "Cyber security": "cyber
                  "Big data": "bigdata", "Threat, risk & harm": "threat"}
 IPHONE_URL = "https://stirlingcraig-cyber.github.io/cas-cortex-/"
 TABS = ["Home", "Setup", "Train", "Progress", "Skills & Memory", "Teach", "Threat Monitor", "Learn from You",
-        "Safety", "Help"]
+        "Self-Improve", "Safety", "Help"]
 
 
 def ui_font(size=10, weight="normal"):
@@ -125,7 +125,7 @@ class CortexApp(tk.Tk):
         self._monitor_offset = 0
 
         self.title("CAS Cortex")
-        self.geometry("1180x780")
+        self.geometry("1260x800")
         self.minsize(1000, 680)
         self.configure(bg=BG)
         self._icon()
@@ -140,8 +140,8 @@ class CortexApp(tk.Tk):
             self.nb.add(f, text=f"  {name}  ")
             self.pages[name] = f
         self.build_home(); self.build_setup(); self.build_train(); self.build_progress()
-        self.build_memory(); self.build_teach(); self.build_monitor(); self.build_learn(); self.build_safety()
-        self.build_help()
+        self.build_memory(); self.build_teach(); self.build_monitor(); self.build_learn(); self.build_improve()
+        self.build_safety(); self.build_help()
         self.nb.bind("<<NotebookTabChanged>>", self._on_tab)
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         self.after(100, self._poll)
@@ -173,7 +173,7 @@ class CortexApp(tk.Tk):
         st.configure("CardMuted.TLabel", foreground=GREY, background=CARD, font=ui_font(9))
         st.configure("CardBig.TLabel", foreground=NAVY, background=CARD, font=ui_font(15, "bold"))
         st.configure("Main.TNotebook", background=BG, borderwidth=0)
-        st.configure("Main.TNotebook.Tab", padding=(6, 7), font=ui_font(10, "bold"), background="#DCE6E8",
+        st.configure("Main.TNotebook.Tab", padding=(5, 7), font=ui_font(9, "bold"), background="#DCE6E8",
                      foreground=NAVY)
         st.map("Main.TNotebook.Tab", background=[("selected", CARD)], foreground=[("selected", TEAL)])
         st.configure("Accent.TButton", font=ui_font(10, "bold"), foreground="white", background=TEAL,
@@ -219,13 +219,13 @@ class CortexApp(tk.Tk):
         refresh = {"Home": self.refresh_home, "Progress": self.refresh_progress,
                    "Skills & Memory": self.refresh_memory, "Teach": self.refresh_teach,
                    "Safety": self.refresh_safety, "Train": self.refresh_train,
-                   "Learn from You": self.refresh_learn}.get(name)
+                   "Learn from You": self.refresh_learn, "Self-Improve": self.refresh_improve}.get(name)
         if refresh:
             refresh()
 
     def refresh_all(self):
         for f in (self.refresh_home, self.refresh_train, self.refresh_progress, self.refresh_memory,
-                  self.refresh_teach, self.refresh_safety, self.refresh_learn):
+                  self.refresh_teach, self.refresh_safety, self.refresh_learn, self.refresh_improve):
             try:
                 f()
             except Exception as e:  # never let one panel break the app
@@ -1277,6 +1277,104 @@ class CortexApp(tk.Tk):
                            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         self.learn_con.write((r.stdout or r.stderr or "").strip() or ("Done." if r.returncode == 0 else "Failed."))
         self.refresh_learn()
+
+    # ========================================================= SELF-IMPROVE
+    def build_improve(self):
+        p = self.pages["Self-Improve"]
+        ttk.Label(p, text="Step 3 - Cortex improves its own method", style="H1.TLabel").pack(anchor="w")
+        ttk.Label(p, text="Cortex proposes small changes to how it solves tasks, tests each one against the hidden "
+                          "evaluator, and only suggests a change that genuinely scores better. You approve or reject "
+                          "each one. It can never change the evaluator, the sandbox or the safety rules.",
+                  style="Muted.TLabel", wraplength=1080).pack(anchor="w", pady=(2, 10))
+        top = ttk.Frame(p, style="Page.TFrame"); top.pack(fill="both", expand=True)
+
+        left = ttk.LabelFrame(top, text="Proposals", padding=10); left.pack(side="left", fill="both", expand=True)
+        row = ttk.Frame(left, style="Page.TFrame"); row.pack(fill="x")
+        b1 = ttk.Button(row, text="Propose improvements", style="Accent.TButton", command=self._start_improve)
+        b1.pack(side="left")
+        ttk.Label(row, text="tries a few changes - this runs the model, so it takes a while",
+                  style="Muted.TLabel").pack(side="left", padx=8)
+        tf, self.imp_tree = make_tree(left, ["ID", "Status", "Before", "After", "Change"], [95, 80, 60, 60, 300], height=9)
+        tf.pack(fill="both", expand=True, pady=(8, 0))
+        for st_name, col in (("proposed", NAVY), ("applied", GREEN), ("rejected", GREY)):
+            self.imp_tree.tag_configure(st_name, foreground=col)
+        self.imp_tree.bind("<<TreeviewSelect>>", self._show_improvement)
+        r2 = ttk.Frame(left, style="Page.TFrame"); r2.pack(fill="x", pady=(6, 0))
+        ttk.Button(r2, text="Approve & apply", style="Accent.TButton", command=lambda: self._decide_improvement(True)).pack(side="left")
+        ttk.Button(r2, text="Reject", command=lambda: self._decide_improvement(False)).pack(side="left", padx=6)
+        self.imp_detail = tk.Text(left, height=4, wrap="word", font=ui_font(9), relief="solid", borderwidth=1, bg="#FBFCFD")
+        self.imp_detail.pack(fill="x", pady=(6, 0))
+
+        right = ttk.Frame(top, style="Page.TFrame"); right.pack(side="left", fill="y", padx=(12, 0))
+        cur = ttk.LabelFrame(right, text="Current method", padding=10); cur.pack(fill="x")
+        self.tuning_text = tk.Text(cur, width=34, height=8, wrap="word", font=MONO, relief="flat", bg=BG)
+        self.tuning_text.pack()
+        ttk.Button(cur, text="Reset to defaults", command=self._reset_tuning).pack(anchor="w", pady=(6, 0))
+        lock = ttk.LabelFrame(right, text="Out of reach", padding=10); lock.pack(fill="x", pady=(10, 0))
+        for t in ("The hidden evaluator & task bank", "The code sandbox", "The governance / safety layer",
+                  "The fixed safety prompt"):
+            ttk.Label(lock, text="✓ " + t + " - cannot be changed", wraplength=300, style="Muted.TLabel").pack(anchor="w")
+        self.improve_con = Console(p, height=6)
+        self.improve_con.pack(fill="x", pady=(8, 0))
+        self._reg([b1])
+
+    def refresh_improve(self):
+        from . import improve, tuning
+        props = improve.load_proposals(self.home)
+        rows = [(x["id"], x["status"], f"{x['baseline_score']:.0%}", f"{x['candidate_score']:.0%}", x["rationale"])
+                for x in props if x["status"] != "rejected"]
+        fill_tree(self.imp_tree, rows, tags_fn=lambda r: [r[1]])
+        t = tuning.load(self.home).describe()
+        self.tuning_text.configure(state="normal"); self.tuning_text.delete("1.0", "end")
+        self.tuning_text.insert("1.0", "\n".join(f"{k}: {v or '(none)'}" for k, v in t.items()))
+        self.tuning_text.configure(state="disabled")
+
+    def _start_improve(self):
+        if not self.setup_ok:
+            messagebox.showinfo("Self-improve", "Your AI model isn't ready - set it up on the Setup tab first.")
+            return
+        self.run("improve", ["improve", "--candidates", "3", "--max-calls", "400"], self.improve_con,
+                 label="Testing improvements to Cortex's method...", done=lambda rc: self.refresh_improve())
+
+    def _selected_improvement(self):
+        sel = self.imp_tree.selection()
+        return str(self.imp_tree.item(sel[0])["values"][0]) if sel else None
+
+    def _show_improvement(self, _=None):
+        from . import improve
+        pid = self._selected_improvement()
+        p = next((x for x in improve.load_proposals(self.home) if x["id"] == pid), None)
+        self.imp_detail.delete("1.0", "end")
+        if p:
+            change = "; ".join(f"{k}: {v[0]} -> {v[1]}" for k, v in p["change"].items())
+            txt = f"{p['rationale']}\n\nScore on hidden tests: {p['baseline_score']:.0%} -> {p['candidate_score']:.0%}\nChanges: {change}"
+            if p.get("addendum"):
+                txt += f"\nAdds to the solving prompt: \"{p['addendum']}\""
+            self.imp_detail.insert("1.0", txt)
+
+    def _decide_improvement(self, approve):
+        from . import improve
+        pid = self._selected_improvement()
+        if not pid:
+            messagebox.showinfo("Self-improve", "Select a proposal first.")
+            return
+        try:
+            if approve:
+                p = improve.apply(self.home, pid, AuditLog(load_config(self.home).audit_path))
+                self.improve_con.write(f"Applied: {p['rationale']} - this is now Cortex's method.")
+            else:
+                improve.reject(self.home, pid, AuditLog(load_config(self.home).audit_path))
+                self.improve_con.write("Rejected.")
+        except (KeyError, ValueError) as e:
+            messagebox.showwarning("Self-improve", str(e))
+        self.refresh_improve()
+
+    def _reset_tuning(self):
+        from . import tuning
+        if messagebox.askyesno("Reset method", "Reset Cortex's method to the built-in defaults?"):
+            tuning.reset(self.home)
+            AuditLog(load_config(self.home).audit_path).write("tuning_reset", via="gui")
+            self.refresh_improve()
 
     # ============================================================== SAFETY
     def build_safety(self):
