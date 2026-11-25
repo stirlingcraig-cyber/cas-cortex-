@@ -1292,7 +1292,9 @@ class CortexApp(tk.Tk):
         row = ttk.Frame(left, style="Page.TFrame"); row.pack(fill="x")
         b1 = ttk.Button(row, text="Propose improvements", style="Accent.TButton", command=self._start_improve)
         b1.pack(side="left")
-        ttk.Label(row, text="tries a few changes - this runs the model, so it takes a while",
+        b1b = ttk.Button(row, text="Evolve (population search)", command=self._start_evolve)
+        b1b.pack(side="left", padx=6)
+        ttk.Label(row, text="both run the model, so they take a while",
                   style="Muted.TLabel").pack(side="left", padx=8)
         tf, self.imp_tree = make_tree(left, ["ID", "Status", "Before", "After", "Change"], [95, 80, 60, 60, 300], height=9)
         tf.pack(fill="both", expand=True, pady=(8, 0))
@@ -1316,7 +1318,14 @@ class CortexApp(tk.Tk):
             ttk.Label(lock, text="✓ " + t + " - cannot be changed", wraplength=300, style="Muted.TLabel").pack(anchor="w")
         self.improve_con = Console(p, height=6)
         self.improve_con.pack(fill="x", pady=(8, 0))
-        self._reg([b1])
+        self._reg([b1, b1b])
+
+    def _start_evolve(self):
+        if not self.setup_ok:
+            messagebox.showinfo("Self-improve", "Your AI model isn't ready - set it up on the Setup tab first.")
+            return
+        self.run("evolve", ["evolve", "--population", "5", "--generations", "3", "--max-calls", "800"],
+                 self.improve_con, label="Evolving a population of methods...", done=lambda rc: self.refresh_improve())
 
     def refresh_improve(self):
         from . import improve, tuning
@@ -1350,6 +1359,8 @@ class CortexApp(tk.Tk):
             txt = f"{p['rationale']}\n\nScore on hidden tests: {p['baseline_score']:.0%} -> {p['candidate_score']:.0%}\nChanges: {change}"
             if p.get("addendum"):
                 txt += f"\nAdds to the solving prompt: \"{p['addendum']}\""
+            if p.get("method") == "evolution" and p.get("history"):
+                txt += f"\nFound by evolution over {len(p['history'])} generations."
             self.imp_detail.insert("1.0", txt)
 
     def _decide_improvement(self, approve):

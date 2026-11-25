@@ -256,6 +256,22 @@ def cmd_improve(rt, a):
     rt.audit.write("self_improvement_end", baseline=res["baseline"], queued=bool(res["queued"]))
 
 
+def cmd_evolve(rt, a):
+    from . import evolve
+    rt.ensure_integrity()
+    tasks = rt.tasks()
+    rt.audit.write("evolve_start", population=a.population, generations=a.generations, split=a.split)
+    pop = max(2, min(12, a.population))
+    res = evolve.evolve(rt.cfg, rt.llm, tasks, population=pop, generations=max(1, a.generations),
+                        split=a.split, sample=a.sample, hours=a.hours, seed=a.seed)
+    rt.audit.write("evolve_end", variants=res["variants_tested"], champion=res["champion_score"],
+                   queued=bool(res["queued"]))
+    print(f"\nTested {res['variants_tested']} variants over {res['generations']} generation(s). "
+          f"Best {res['champion_score']:.0%} vs current {res['baseline']:.0%}.")
+    if res["queued"]:
+        print("Champion queued as a proposal - review it on the Self-Improve tab or with: cortex improvements")
+
+
 def cmd_improvements(rt, a):
     from . import improve
     if a.approve:
@@ -522,6 +538,13 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--split", choices=["holdout", "train", "all"], default="holdout")
     s.add_argument("--sample", type=int, help="only score this many tasks (faster)")
     s.add_argument("--max-calls", type=int)
+    s = sub.add_parser("evolve", help="step 4: breed a population of tunings and keep the best")
+    s.add_argument("--population", type=int, default=5, help="variants per generation (2-12)")
+    s.add_argument("--generations", type=int, default=3)
+    s.add_argument("--split", choices=["holdout", "train", "all"], default="holdout")
+    s.add_argument("--sample", type=int, help="score only this many tasks per variant (faster)")
+    s.add_argument("--hours", type=float, help="stop after about this long")
+    s.add_argument("--seed", type=int); s.add_argument("--max-calls", type=int)
     s = sub.add_parser("improvements", help="review self-improvement proposals")
     s.add_argument("--approve", nargs="+", metavar="ID"); s.add_argument("--reject", nargs="+", metavar="ID")
     s.add_argument("--all", action="store_true")
@@ -594,7 +617,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 COMMANDS = {"status": cmd_status, "doctor": cmd_doctor, "gui": cmd_gui, "check-sandbox": cmd_check_sandbox, "publish": cmd_publish,
-            "improve": cmd_improve, "improvements": cmd_improvements, "tuning": cmd_tuning, "add-pack": cmd_add_pack, "import-claude": cmd_import_claude,
+            "improve": cmd_improve, "evolve": cmd_evolve, "improvements": cmd_improvements, "tuning": cmd_tuning, "add-pack": cmd_add_pack, "import-claude": cmd_import_claude,
             "proposals": cmd_proposals, "learn-proposal": cmd_learn_proposal, "feedback": cmd_feedback,
             "focus": cmd_focus, "autopilot": cmd_autopilot, "tasks": cmd_tasks, "train": cmd_train, "eval": cmd_eval,
             "solve": cmd_solve, "learn": cmd_learn, "skills": cmd_skills, "memory": cmd_memory,

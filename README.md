@@ -93,6 +93,15 @@ Training stays on the PC because it needs the local AI model. To send results to
 
 Only learning data is published. **Alerts and log contents are never published**, because the repo is public.
 
+## Step 4 — evolutionary search
+
+**Self-Improve → Evolve (population search)**, or `.\cortex evolve --population 5 --generations 3`. Cortex breeds a
+population of differently-tuned copies of itself, scores each against the hidden evaluator, keeps the best, and breeds
+the next generation (mutation + crossover) — finding a *combination* of settings no single change would reach. The
+champion is queued as a proposal you approve through the same flow as step 3. It evolves only the safe method; the
+evaluator, sandbox, governance and safety prompt are never touched, each variant is scored once, and the search
+respects the kill switch, spending cap and any time budget.
+
 ## Step 3 — gated self-improvement
 
 Cortex proposes changes to **its own method** — the settings and a short prompt addendum it uses to solve tasks
