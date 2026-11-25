@@ -6,6 +6,7 @@ evaluator's hidden tests.
 from __future__ import annotations
 
 import ast
+import json
 import re
 import time
 from dataclasses import dataclass, field
@@ -50,9 +51,11 @@ this exact task's values>",
 Give 0-4 knowledge triples of general facts (e.g. ["population stdev", "divides by", "n"])."""
 
 TESTGEN_SYSTEM = """You write rigorous Python test snippets for a specification. Reply with JSON
-only: {"tests": ["assert ...", ...]}. Give 6-10 independent snippets. Each must be valid
-Python using only the target function/class and the standard library, cover normal cases and
-edge cases stated in the spec, and have expected values you are certain of."""
+ONLY, in exactly this shape:
+{"tests": ["assert fn(1) == 2", "assert fn(0) == 0"]}
+Give 6-10 independent snippets. Each must be a single line starting with `assert`, call the target
+function by its exact name, use only the standard library, cover normal and edge cases from the
+spec, and use expected values you are certain of. No prose, no code fences, no comments."""
 
 
 def _is_main_guard(node) -> bool:
@@ -377,16 +380,68 @@ class CortexAgent:
         return lesson, r.tokens
 
     # ---------------------------------------------------- self-generated work
+    def _parse_tests(self, text: str, entry_point: str) -> list[str]:
+        """Pull usable `assert` snippets out of a model's reply, however it formatted them -
+        proper JSON, a bare array, a code block, or just lines of asserts. Small local models
+        rarely return clean JSON, so this harvests tests from all of those."""
+        from .llm import strip_thinking
+        candidates: list[str] = []
+        data = extract_json(text)
+        if isinstance(data, dict) and isinstance(data.get("tests"), list):
+            candidates += [t for t in data["tests"] if isinstance(t, str)]
+        clean = strip_thinking(text)
+        if not candidates:                       # maybe a bare JSON array of strings
+            start, end = clean.find("["), clean.rfind("]")
+            if start != -1 and end > start:
+                try:
+                    arr = json.loads(clean[start:end + 1])
+                    candidates += [t for t in arr if isinstance(t, str)]
+                except (json.JSONDecodeError, ValueError):
+                    pass
+        for raw in clean.replace("```python", "").replace("```", "").splitlines():
+            line = raw.strip().strip(",").strip()
+            if (line.startswith("assert ") or line.startswith('"assert ')) and entry_point in line:
+                candidates.append(line.strip('"'))
+        valid, seen = [], set()
+        for t in candidates:
+            t = t.strip().strip('"').strip()
+            key = " ".join(t.split())
+            if entry_point not in t or key in seen:
+                continue
+            try:
+                ast.parse(t)
+            except SyntaxError:
+                continue
+            seen.add(key)
+            valid.append(t)
+        return valid
+
+    def _generate_tests(self, spec: str, entry_point: str) -> tuple[list[str], int]:
+        prompt = (f"Specification for a Python function `{entry_point}`:\n{spec}\n\n"
+                  f"Write independent test snippets, each a single line starting with `assert "
+                  f"{entry_point}(` and a value you are sure of. Reply with JSON only, like:\n"
+                  f'{{"tests": ["assert {entry_point}(1) == 2", "assert {entry_point}(0) == 0"]}}')
+        tests, toks, seen = [], 0, set()
+        for i in range(3):                       # retry: small models often need a couple of goes
+            r = self.llm.complete(TESTGEN_SYSTEM, [{"role": "user", "content": prompt}],
+                                  max_tokens=1600, temperature=0.2 + 0.3 * i)
+            toks += r.tokens
+            for t in self._parse_tests(r.text, entry_point):
+                key = " ".join(t.split())
+                if key not in seen:
+                    seen.add(key)
+                    tests.append(t)
+            if len(tests) >= 5:
+                break
+        return tests, toks
+
     def solve_freeform(self, spec: str, entry_point: str, domain: str, title: str = "",
                        reference_code: str | None = None) -> Outcome:
         """Learn a brand-new capability from a plain-English spec: write tests first,
         then the code. Resulting skills are marked 'self-tested' (lower trust). With
         reference_code (e.g. a function from your Claude history) only tests the reference
         passes are kept, and the skill is marked 'reference-checked'."""
-        r = self.llm.complete(TESTGEN_SYSTEM, [{"role": "user", "content":
-                              f"Specification for `{entry_point}`:\n{spec}"}], max_tokens=2500)
-        data = extract_json(r.text) or {}
-        tests = [t for t in data.get("tests", []) if isinstance(t, str) and entry_point in t]
+        tests, toks = self._generate_tests(spec, entry_point)
         trust = "self-tested"
         if reference_code:
             from .claude_history import filter_tests_with_reference
@@ -395,10 +450,13 @@ class CortexAgent:
             self.log(f"  kept {len(tests)} of {before} self-tests that your original function passes")
             trust = "reference-checked"
         if len(tests) < 3:
-            raise RuntimeError("could not generate a usable test suite for this spec")
+            raise RuntimeError(
+                f"the model couldn't write a usable test suite for `{entry_point}` after 3 tries. "
+                "Try rewording the description with a concrete example or two (e.g. 'f([1,2,3]) returns 6'), "
+                "use a larger model, or add it on the 'Add a practice task' tab where you write the tests yourself.")
         self.log(f"  generated {len(tests)} self-tests")
         view = TaskView(id=f"adhoc.{entry_point}", domain=domain, title=title or entry_point,
                         entry_point=entry_point, prompt=spec, visible_tests=tuple(tests))
         out = self.solve(view, mode="adhoc", trust=trust)
-        out.tokens += r.tokens
+        out.tokens += toks
         return out

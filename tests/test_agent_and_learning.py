@@ -113,3 +113,37 @@ def test_forgotten_import_is_fixed_without_another_model_call(mem, audit):
     assert o.solved and o.attempts == 1 and len(llm.calls) == 2           # 1 attempt + 1 reflection
     assert "import math" in o.code and "from collections import defaultdict" in o.code
     assert any("auto-fixed missing import" in l for l in logs)
+
+
+def test_testgen_parsing_tolerates_messy_model_output(mem, audit):
+    """Small models rarely return clean JSON. _parse_tests must harvest asserts from JSON,
+    bare arrays, code fences, <think> blocks and loose lines - this is what caused
+    'could not generate a usable test suite'."""
+    from cortex.llm import FakeLLM
+    agent = CortexAgent(FakeLLM([]), mem, audit, log=quiet)
+    ep = "login_storm"
+    json_ok = '{"tests": ["assert login_storm([0]*10) is True", "assert login_storm([]) is False"]}'
+    assert len(agent._parse_tests(json_ok, ep)) == 2
+    fenced = "Here are tests:\n```python\nassert login_storm([1,2]) is False\nassert login_storm(list(range(10))) is True\n```"
+    assert len(agent._parse_tests(fenced, ep)) == 2
+    thinky = '<think>let me think</think>\n{"tests": ["assert login_storm([5]) is False"]}'
+    assert agent._parse_tests(thinky, ep) == ["assert login_storm([5]) is False"]
+    loose = 'assert login_storm([0,30,59]) is False\nassert login_storm([0]*10) is True\nnot a test line'
+    assert len(agent._parse_tests(loose, ep)) == 2
+    assert agent._parse_tests('assert something_else(1) == 1', ep) == []      # wrong function ignored
+    assert agent._parse_tests('assert login_storm(', ep) == []               # unparseable ignored
+
+
+def test_freeform_retries_then_gives_clear_error(mem, audit):
+    from cortex.llm import FakeLLM
+    # first two tries unusable, third gives 3 good tests
+    good = '{"tests": ["assert login_storm([0]*10) is True", "assert login_storm([]) is False", "assert login_storm([1,2,3]) is False"]}'
+    llm = FakeLLM(["sorry, no idea", "{}", good, "```python\ndef login_storm(x):\n    return len(x) >= 10\n```", "{}"])
+    o = CortexAgent(llm, mem, audit, log=quiet).solve_freeform(
+        "Return True if 10+ timestamps fall in any 60s window", "login_storm", "cyber")
+    assert o.solved and mem.get_skill("login_storm").trust == "self-tested"
+    # never usable -> a helpful error, not a crash
+    import pytest
+    with pytest.raises(RuntimeError, match="Add a practice task"):
+        CortexAgent(FakeLLM(["nope", "still nope", "nope again"]), mem, audit, log=quiet).solve_freeform(
+            "do a thing", "mystery_fn", "coding")
