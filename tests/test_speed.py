@@ -199,3 +199,23 @@ def test_temperature_rises_when_stuck(mem, audit):
     CortexAgent(llm, mem, audit, max_attempts=6, stuck_after=5, log=quiet).solve(T["coding.merge_intervals"].public_view())
     temps = [t for t in llm.temps if t is not None]
     assert temps[0] == 0.2 and max(temps) >= 0.85          # starts focused, escalates to explore
+
+
+def test_focus_unsolved_unparks_and_drills_only_unsolved(tmp_path, audit):
+    from cortex.memory.store import Memory
+    mem = Memory(tmp_path / "f.db")
+    tasks = [t for t in BUILTIN_TASKS if t.domain == "cyber"]
+    # mark one task as parked (3 failed rounds) and leave the others unsolved
+    hard = T["cyber.extract_iocs"]
+    for _ in range(3):
+        mem.log_episode(task_id=hard.id, domain="cyber", mode="train", attempts=4, solved=False,
+                        visible_pass=0, code="", reflection="", skills_used=[], tokens=0, duration=1)
+    from cortex.trainer import parked, select_curriculum
+    import random
+    assert parked(hard, mem)                                   # parked under normal training
+    plan = select_curriculum(tasks, mem, random.Random(0), focus_unsolved=True, unpark=True)
+    assert hard in plan and all(t.entry_point not in {s.name for s in mem.all_skills()} for t in plan)
+    # focus training solves them all (oracle model) despite the parking
+    res = train(CortexAgent(oracle_llm(), mem, audit, log=quiet), mem, tasks, 1, log=quiet, focus_unsolved=True)
+    assert {s.name for s in mem.all_skills()} >= {"detect_bruteforce", "extract_iocs", "suspicious_commandline"}
+    assert res and all(r["task"] != "cyber.cvss31" for r in res)   # holdout never trained

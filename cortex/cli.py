@@ -54,9 +54,14 @@ class Runtime:
         return [t for t in ts if domain in (None, "all") or t.domain == domain]
 
     def ensure_integrity(self):
+        from .governance import lock_from_other_version
         if not self.cfg.integrity_path.exists():
             lock_integrity(self.cfg.integrity_path)
             self.audit.write("integrity_locked", auto=True)
+        elif lock_from_other_version(self.cfg.integrity_path):
+            # Cortex was updated: the protected files changed legitimately, so refresh the lock.
+            lock_integrity(self.cfg.integrity_path)
+            self.audit.write("integrity_relocked", reason="version_update", version=__version__)
         verify_integrity(self.cfg.integrity_path, required=True)
 
 
@@ -330,7 +335,7 @@ def cmd_train(rt, a):
     t0 = time.time()
     try:
         res = train(rt.agent(mem), mem, tasks, a.rounds, seed=a.seed, hours=a.hours,
-                    until_mastered=a.until_mastered)
+                    until_mastered=a.until_mastered, focus_unsolved=a.focus_unsolved)
     finally:
         rt.audit.write("train_end", calls=rt.budget.calls, tokens=rt.budget.tokens)
     solved = sum(r["solved"] for r in res)
@@ -579,6 +584,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--hours", type=float, help="hands-off: keep training for up to this long")
     s.add_argument("--until-mastered", action="store_true",
                    help="hands-off: keep going until every practice task is mastered (stops if stuck)")
+    s.add_argument("--focus-unsolved", action="store_true",
+                   help="un-park and drill ONLY the still-unsolved tasks until solved or stuck")
     s.add_argument("--then-eval", action="store_true", help="run the holdout evaluation when finished")
     s.add_argument("--then-publish", action="store_true", help="publish to the iPhone app when finished")
     s.add_argument("--attempts", type=int); s.add_argument("--max-calls", type=int)

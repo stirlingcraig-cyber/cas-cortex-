@@ -32,14 +32,16 @@ def parked(task: Task, mem: Memory, now: float | None = None) -> bool:
 
 
 def select_curriculum(tasks: list[Task], mem: Memory, rng: random.Random, now: float | None = None,
-                      log=None) -> list[Task]:
+                      log=None, focus_unsolved: bool = False, unpark: bool = False) -> list[Task]:
     have = {s.name for s in mem.all_skills()}
     unsolved = [t for t in tasks if t.entry_point not in have]
-    resting = [t for t in unsolved if parked(t, mem, now)]
+    resting = [] if unpark else [t for t in unsolved if parked(t, mem, now)]
     if resting and log:
         log(f"  parked for now (failed {PARK_AFTER} rounds in a row, retried in {PARK_DAYS} days): "
             + ", ".join(t.id for t in resting))
     plan = [t for t in unsolved if t not in resting]
+    if focus_unsolved:
+        return plan                        # only the unsolved ones, no revision task, nothing parked
     mastered = [t for t in tasks if t.entry_point in have]
     if mastered:
         plan.append(rng.choice(mastered))
@@ -48,14 +50,16 @@ def select_curriculum(tasks: list[Task], mem: Memory, rng: random.Random, now: f
 
 def train(agent: CortexAgent, mem: Memory, tasks: list[Task], rounds: int, log=print,
           seed: int | None = None, hours: float | None = None, until_mastered: bool = False,
-          plateau: int = 3, clock=time.time) -> list[dict]:
+          plateau: int = 3, clock=time.time, focus_unsolved: bool = False) -> list[dict]:
     """Practise for `rounds` generations - or, hands-off, for up to `hours` and/or until every
-    practice task is mastered. Stops early when `plateau` generations in a row learn nothing new."""
+    practice task is mastered. Stops early when `plateau` generations in a row learn nothing new.
+    focus_unsolved: ignore parking and drill ONLY the still-unsolved practice tasks until they are
+    solved or no new skill is learned for `plateau` generations."""
     rng = random.Random(seed)
     train_tasks = [t for t in tasks if t.split == "train"]
     summary = []
     deadline = clock() + hours * 3600 if hours else None
-    hands_off = bool(hours or until_mastered)
+    hands_off = bool(hours or until_mastered or focus_unsolved)
     # In hands-off mode `rounds` is only a cap when set above 1 (the default of 1 means "no cap").
     limit = (rounds if rounds and rounds > 1 else 10_000) if hands_off else rounds
     no_progress = 0
@@ -65,10 +69,13 @@ def train(agent: CortexAgent, mem: Memory, tasks: list[Task], rounds: int, log=p
             break
         gen = mem.get_meta("generation", 0) + 1
         before = len(mem.all_skills())
-        plan = select_curriculum(train_tasks, mem, rng, now=clock(), log=log)
+        plan = select_curriculum(train_tasks, mem, rng, now=clock(), log=log,
+                                 focus_unsolved=focus_unsolved, unpark=focus_unsolved)
         unsolved_left = [t for t in plan if t.entry_point not in {s.name for s in mem.all_skills()}]
         if hands_off and not unsolved_left:
-            log("\nEvery practice task is mastered (or parked) - nothing left to learn right now.")
+            msg = ("\nEvery practice task is now solved!" if focus_unsolved
+                   else "\nEvery practice task is mastered (or parked) - nothing left to learn right now.")
+            log(msg)
             break
         log(f"\n=== generation {gen}: {len(plan)} task(s) ===")
         for t in plan:

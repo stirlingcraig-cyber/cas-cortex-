@@ -554,8 +554,9 @@ class CortexApp(tk.Tk):
         ttk.Checkbutton(after, text="Publish to iPhone", variable=self.then_pub).pack(side="left", padx=10)
         bt = ttk.Frame(lf, style="Page.TFrame"); bt.grid(row=4, column=0, columnspan=4, sticky="w", pady=(10, 0))
         start = ttk.Button(bt, text="Start training", style="Accent.TButton", command=self._start_train)
+        focus = ttk.Button(bt, text="Solve unsolved now", command=self._start_focus)
         stop = ttk.Button(bt, text="Stop", style="Danger.TButton", command=lambda: (self.stop("train"), self.stop("solve")), state="disabled")
-        start.pack(side="left"); stop.pack(side="left", padx=8)
+        start.pack(side="left"); focus.pack(side="left", padx=8); stop.pack(side="left", padx=8)
 
         lf2 = ttk.LabelFrame(top, text="Try a single task (step 2)", padding=10)
         lf2.pack(side="left", fill="both", expand=True, padx=(12, 0))
@@ -568,7 +569,7 @@ class CortexApp(tk.Tk):
         solve.grid(row=1, column=0, sticky="w", pady=(10, 0))
         ttk.Label(lf2, text="Time guide: a local 7B model takes ~20-90 s per attempt.",
                   style="Muted.TLabel").grid(row=2, column=0, columnspan=2, sticky="w", pady=(8, 0))
-        self._reg([start, solve], stop=("train", stop))
+        self._reg([start, focus, solve], stop=("train", stop))
         self._stop_buttons["solve"] = stop
 
         self.train_info = ttk.Label(p, text="", style="H2.TLabel")
@@ -604,6 +605,19 @@ class CortexApp(tk.Tk):
         self._train_stats = {"done": 0, "solved": 0}
         self.train_info.configure(text="Starting...")
         self.run("train", args, self.train_con, label="Training...", done=lambda rc: self.refresh_all())
+
+    def _start_focus(self):
+        # un-park and drill only the unsolved tasks, with more attempts, until solved or stuck
+        args = ["train", "--focus-unsolved", "--attempts", "8",
+                "--max-calls", str(max(self.max_calls.get(), 2000))]
+        d = DOMAIN_LABELS[self.train_dom.get()]
+        if d:
+            args += ["--domain", d]
+        if self.then_eval.get():
+            args.append("--then-eval")
+        self._train_stats = {"done": 0, "solved": 0}
+        self.train_info.configure(text="Focusing on unsolved tasks...")
+        self.run("train", args, self.train_con, label="Solving unsolved tasks...", done=lambda rc: self.refresh_all())
 
     def _train_progress(self, line):
         st = getattr(self, "_train_stats", None)

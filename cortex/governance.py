@@ -118,18 +118,41 @@ def _file_hashes() -> dict[str, str]:
     return {rel: hashlib.sha256((PKG / rel).read_bytes()).hexdigest() for rel in PROTECTED}
 
 
+def _cortex_version() -> str:
+    from . import __version__
+    return __version__
+
+
 def lock_integrity(path: Path) -> dict[str, str]:
     h = _file_hashes()
+    h["_version"] = _cortex_version()      # stamp the lock with the Cortex version it was made for
     Path(path).write_text(json.dumps(h, indent=2), encoding="utf-8")
     return h
 
 
+def lock_from_other_version(path: Path) -> bool:
+    """True if the lock was made by a DIFFERENT Cortex version - i.e. the protected files changed
+    because the user installed an update, not because anything was tampered with."""
+    path = Path(path)
+    if not path.exists():
+        return False
+    try:
+        return json.loads(path.read_text(encoding="utf-8")).get("_version") != _cortex_version()
+    except (json.JSONDecodeError, OSError):
+        return False
+
+
 def verify_integrity(path: Path, required: bool = False) -> list[str]:
-    """Return list of changed files. Raises if `required` and anything changed or no lock."""
+    """Return list of changed files. Raises if `required` and anything changed or no lock.
+    A lock left by an earlier Cortex version is treated as needing a refresh, not as tampering."""
     path = Path(path)
     if not path.exists():
         if required:
             raise IntegrityError("no integrity lock - run `cortex lock` first")
+        return []
+    if lock_from_other_version(path):
+        # an update changed the protected files legitimately: refresh the lock instead of blocking
+        lock_integrity(path)
         return []
     saved = json.loads(path.read_text(encoding="utf-8"))
     now = _file_hashes()

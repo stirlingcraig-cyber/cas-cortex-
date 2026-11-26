@@ -130,6 +130,17 @@ cracks hard tasks. The history is cleared the moment it solves.
   missing security headers, and classify a web attack. These recognise attacks and vulnerable code (the scanner /
   IDS side); they don't generate exploits.
 
+## Solving every practice task (incl. parked)
+
+If training reports "every practice task is mastered (or parked)" but some skills are still missing, those tasks
+were **parked** (failed 3 rounds, rested for 3 days). To drill them now: **Train tab → Solve unsolved now**
+(or `.\cortex train --focus-unsolved`). It un-parks every unsolved task and retries only those, with more attempts,
+using the failed-attempt memory, until they're solved or no new skill is learned. Whether *all* of them solve depends
+on your model — a bigger or GPU model solves more (Setup → Speed test).
+
+Updating Cortex no longer triggers a false **INTEGRITY** error: the lock is version-stamped and refreshes itself
+automatically after an update, while a real change to a protected file within the same version is still blocked.
+
 ## Fast, hands-off training
 
 * **Train tab → How long: For 2 hours / Until mastered**, tick *Evaluate* (and *Publish to iPhone*), and walk away.

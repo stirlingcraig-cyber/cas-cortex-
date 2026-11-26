@@ -79,8 +79,9 @@ def test_score_is_read_only_and_needs_integrity(trained):
     assert 0.0 <= s <= 1.0
     after = Memory(trained.db_path).stats()
     assert after["episodes"] == before["episodes"] and after["eval_runs"] == before["eval_runs"]  # no writes
-    # if the evaluator/sandbox/governance changed, scoring refuses
-    trained.integrity_path.write_text(json.dumps({"sandbox.py": "tampered"}))
+    # a change to the evaluator/sandbox/governance WITHIN the same version makes scoring refuse
+    from cortex import governance
+    trained.integrity_path.write_text(json.dumps({"sandbox.py": "tampered", "_version": governance._cortex_version()}))
     with pytest.raises(Exception):
         improve.score(trained, tuning.Tuning(), BUILTIN_TASKS, oracle_llm(), sample=1)
 
@@ -133,3 +134,23 @@ def test_cli_improve_then_approve(tmp_path, monkeypatch, capsys):
     cli.main(["--home", home, "improvements", "--approve", pid])
     assert "active method" in capsys.readouterr().out
     assert improve.load_proposals(cfg.home)[0]["status"] == "applied"
+
+
+def test_integrity_lock_refreshes_after_a_cortex_update(tmp_path, monkeypatch):
+    from cortex import governance
+    from cortex.governance import lock_integrity, lock_from_other_version, verify_integrity
+    p = tmp_path / "integrity.json"
+    lock_integrity(p)
+    assert not lock_from_other_version(p) and verify_integrity(p, required=True) == []
+    # simulate installing a new Cortex version: the stamp no longer matches
+    monkeypatch.setattr(governance, "_cortex_version", lambda: "99.0.0")
+    assert lock_from_other_version(p)
+    # verify no longer blocks - it refreshes the lock instead of crying tampering
+    assert verify_integrity(p, required=True) == []
+    assert not lock_from_other_version(p)                       # re-stamped to the new version
+    # but a real change WITHIN the same version is still caught
+    real = governance._file_hashes
+    monkeypatch.setattr(governance, "_file_hashes", lambda: {**real(), "governance.py": "tampered"})
+    import pytest
+    with pytest.raises(Exception):
+        verify_integrity(p, required=True)
